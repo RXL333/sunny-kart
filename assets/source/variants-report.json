@@ -1,0 +1,36 @@
+{
+  "kart": {
+    "bytes": 658968,
+    "triangles": 23540,
+    "format_verified": true,
+    "identical_chassis_wheel_positions": true,
+    "nodes": 120,
+    "driver_meshes": []
+  },
+  "kart-rabbit": {
+    "bytes": 648368,
+    "triangles": 23208,
+    "format_verified": true,
+    "identical_chassis_wheel_positions": true,
+    "nodes": 118,
+    "driver_meshes": [
+      "RabbitLongEar1",
+      "RabbitLongEar-1",
+      "RabbitTooth1",
+      "RabbitTooth-1"
+    ]
+  },
+  "kart-panda": {
+    "bytes": 656824,
+    "triangles": 23268,
+    "format_verified": true,
+    "identical_chassis_wheel_positions": true,
+    "nodes": 117,
+    "driver_meshes": [
+      "PandaEyePatch1",
+      "PandaEyePatch-1",
+      "PandaRoundEar1",
+      "PandaRoundEar-1"
+    ]
+  }
+}

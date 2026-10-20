@@ -1,0 +1,30 @@
+{
+  "format": "glTF 2.0 binary",
+  "bytes": 658968,
+  "triangles": 23540,
+  "nodes": 120,
+  "wheel_groups": [
+    "WheelFrontL",
+    "WheelFrontR",
+    "WheelRearL",
+    "WheelRearR"
+  ],
+  "wheel_axis": "X",
+  "gltf_bounds_min": [
+    -1.0,
+    0.0,
+    -1.6315160989761353
+  ],
+  "gltf_bounds_max": [
+    1.0,
+    2.5999999046325684,
+    1.6979119777679443
+  ],
+  "gltf_dimensions_xyz": [
+    2.0,
+    2.5999999046325684,
+    3.3294280767440796
+  ],
+  "paint_material": "KartPaint",
+  "forward": "+Z"
+}

@@ -1,0 +1,10 @@
+**
+!package.json
+!package-lock.json
+!server/
+!server/**
+!src/
+!src/game/
+!src/game/**
+!Dockerfile
+!.dockerignore

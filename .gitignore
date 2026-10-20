@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+*.blend1
+logs/
+.env
+.env.*
+!.env.example
+.wrangler/
+.render/
