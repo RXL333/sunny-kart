@@ -6,6 +6,7 @@ import { UI } from './ui.js';
 import { Network } from './network.js';
 import { AudioEngine } from './audio.js';
 import { PHYSICS } from './game/physics.js';
+import { drivingInput } from './input.js';
 
 let race=new Race(track),world,online=false,showedResults=false,selection={character:'fox',difficulty:'normal'};
 const keys=new Set(),audio=new AudioEngine();
@@ -46,12 +47,7 @@ function predictPlayer(duration,input){
   race.events.length=eventCount;
 }
 
-function readInput(){const t=ui.touchState??{};return {
-  throttle:keys.has('KeyW')||keys.has('ArrowUp')||t.throttle||ui.autoThrottle?1:0,
-  brake:keys.has('KeyS')||keys.has('ArrowDown')||t.brake?1:0,
-  steer:(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+(Number(t.steer)||0),
-  drift:keys.has('ShiftLeft')||keys.has('ShiftRight')||Boolean(t.drift),nitro:keys.has('Space')||keys.has('KeyN')||Boolean(t.nitro),
-};}
+function readInput(){return drivingInput(keys,ui.touchState,ui.autoThrottle);}
 window.addEventListener('keydown',event=>{
   if(event.target instanceof HTMLInputElement)return;
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Tab'].includes(event.code)&&race.phase!=='menu')event.preventDefault();

@@ -4,6 +4,8 @@
 
 ## 开始游戏
 
+[在线游玩 · GitHub Pages](https://rxl333.github.io/sunny-kart/) · [项目源码](https://github.com/RXL333/sunny-kart)
+
 Windows 双击 **启动游戏.cmd**，浏览器会打开 `http://localhost:3001`。需要已安装 Node.js；本机已经安装。首次缺少依赖时脚本会运行 npm ci。脚本在后台启动游戏服务，日志位于 logs/。
 
 也可在项目目录运行：
@@ -37,7 +39,7 @@ npm start
 
 服务器 60Hz 统一模拟、20Hz 发送快照；客户端 30Hz 发送输入，做本地预测与位置平滑，显示实测往返延迟。断线车辆由 AI 接管，房主离开自动移交。联机不暂停整个比赛，离开可以返回主菜单。
 
-公网邀请需要把 Node 服务部署到可访问主机，并配置 HTTPS/WSS；本项目未部署公网服务器，也没有验证不同外网设备下的延迟。
+公网后端采用 Render Free，配置已保存在 `render.yaml`；当前正在完成账号内的服务部署与公网验证。上线前，Pages 可单人游玩；本地和局域网好友房间可用。不同外网设备下的延迟尚未验收。
 
 GitHub Pages 与后端分开部署的构建、环境变量和免费主机限制见 `docs/部署配置.md`。后端 endpoint 通过仓库 Actions variable `VITE_SERVER_URL` 配置；Pages 上不把 github.io 当作 WebSocket 服务器。新赛道与物理的实现、验收和部署范围见 `docs/地图物理升级.md`。
 

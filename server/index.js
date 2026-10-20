@@ -9,12 +9,18 @@ import { Race } from '../src/game/race.js';
 import { track } from '../src/game/track.js';
 
 const port = Number(process.env.PORT || 3001);
+const setting=(name,fallback,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(process.env[name]))?Number(process.env[name]):fallback));
+const MAX_CLIENTS=setting('MAX_CLIENTS',32,1,512),MAX_ROOMS=setting('MAX_ROOMS',8,1,64);
+const CREATE_COOLDOWN=setting('CREATE_ROOM_COOLDOWN_MS',1000,0,60000);
+const HEARTBEAT_INTERVAL=setting('HEARTBEAT_INTERVAL_MS',30000,1000,120000),LOBBY_IDLE=setting('LOBBY_IDLE_MS',900000,1000,86400000);
 const rooms = new Map();
 const clients = new Map();
 const allowedCharacters = new Set(['fox', 'rabbit', 'panda']);
 const allowedDifficulty = new Set(['easy', 'normal', 'hard']);
 const cleanName = value => String(value || '晴空车手').replace(/[\x00-\x1f<>]/g, '').trim().slice(0, 16) || '晴空车手';
 const send = (client, message) => {
+  if(client.ws.bufferedAmount>1048576){client.ws.close(1013,'Connection too slow');return;}
+  if(message.type==='snapshot'&&client.ws.bufferedAmount>262144)return;
   if (client.ws.readyState === WebSocket.OPEN) client.ws.send(JSON.stringify(message));
 };
 const broadcast = (room, message) => { for (const client of room.members.values()) send(client, message); };
@@ -52,9 +58,14 @@ function receive(client, message) {
   if (data.type === 'ping') { send(client, { type: 'pong', time: data.time, serverTime: Date.now() }); return; }
   if (data.type === 'leave') { leaveRoom(client); send(client, { type: 'left' }); return; }
   if (data.type === 'create') {
+    const now=performance.now();
+    if(now-client.lastCreateAt<CREATE_COOLDOWN)throw new Error('创建房间过于频繁，请稍后重试');
+    const existing=rooms.get(client.room);
+    if(rooms.size>=MAX_ROOMS&&(!existing||existing.members.size>1))throw new Error('当前房间较多，请稍后创建');
+    client.lastCreateAt=now;
     if (client.room) leaveRoom(client);
     client.name = cleanName(data.name); client.character = allowedCharacters.has(data.character) ? data.character : 'fox';
-    const room = { code: newCode(), hostId: client.id, members: new Map([[client.id, client]]), status: 'lobby', difficulty: allowedDifficulty.has(data.difficulty) ? data.difficulty : 'normal', race: null, tick: 0 };
+    const room = { code: newCode(), hostId: client.id, members: new Map([[client.id, client]]), status: 'lobby', difficulty: allowedDifficulty.has(data.difficulty) ? data.difficulty : 'normal', race: null, tick: 0, lastActiveAt:now };
     rooms.set(room.code, room); client.room = room.code;
     send(client, roomState(room)); return;
   }
@@ -67,6 +78,7 @@ function receive(client, message) {
     if (client.room !== room.code) leaveRoom(client);
     client.name = cleanName(data.name); client.character = allowedCharacters.has(data.character) ? data.character : 'fox';
     room.members.set(client.id, client); client.room = room.code;
+    room.lastActiveAt=performance.now();
     broadcast(room, roomState(room)); return;
   }
   const room = rooms.get(client.room);
@@ -137,8 +149,10 @@ const server = http.createServer(async (req, res) => {
 });
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4096, perMessageDeflate: false });
 wss.on('connection', ws => {
-  const client = { id: randomUUID(), ws, name: '晴空车手', character: 'fox', room: null, input: {}, seq: -1, inputAt: 0, messages: 0, rateAt: performance.now() };
+  if(clients.size>=MAX_CLIENTS){ws.send(JSON.stringify({type:'error',message:'当前在线人数较多，请稍后重试'}));ws.close(1013,'Server capacity reached');return;}
+  const client = { id: randomUUID(), ws, name: '晴空车手', character: 'fox', room: null, input: {}, seq: -1, inputAt: 0, messages: 0, rateAt: performance.now(), lastCreateAt:-Infinity, missedHeartbeats:0 };
   clients.set(client.id, client);
+  ws.on('pong',()=>{client.missedHeartbeats=0;});
   send(client, { type: 'welcome', id: client.id, serverTime: Date.now() });
   ws.on('message', bytes => {
     const now = performance.now();
@@ -150,6 +164,17 @@ wss.on('connection', ws => {
   ws.on('close', () => { leaveRoom(client); clients.delete(client.id); });
   ws.on('error', () => { /* close event performs room cleanup. */ });
 });
+
+const maintenance=setInterval(()=>{
+  for(const client of clients.values()){
+    if(client.missedHeartbeats>=2){client.ws.terminate();continue;}
+    client.missedHeartbeats++;if(client.ws.readyState===WebSocket.OPEN)client.ws.ping();
+  }
+  const now=performance.now();
+  for(const room of rooms.values())if(room.status!=='racing'&&now-room.lastActiveAt>LOBBY_IDLE){
+    for(const client of [...room.members.values()]){send(client,{type:'error',message:'房间长时间没有操作，已自动关闭'});leaveRoom(client);client.ws.close(1000,'Room idle timeout');}
+  }
+},HEARTBEAT_INTERVAL);
 
 let previous = performance.now(), accumulator = 0;
 const timer = setInterval(() => {
@@ -163,13 +188,14 @@ const timer = setInterval(() => {
       for (const member of room.members.values()) inputs[member.id] = now - member.inputAt < 450 ? member.input : {};
       room.race.update(1 / 60, {}, inputs); room.tick++;
       if (room.tick % 3 === 0 || room.race.phase === 'finished') broadcast(room, { type: 'snapshot', tick: room.tick, state: room.race.snapshot() });
-      if (room.race.phase === 'finished') { room.status = 'finished'; broadcast(room, roomState(room)); }
+      if (room.race.phase === 'finished') { room.status = 'finished';room.lastActiveAt=now; broadcast(room, roomState(room)); }
     }
   }
 }, 1000 / 60);
 server.listen(port, '0.0.0.0', () => console.log(`Sunny Kart multiplayer listening on http://0.0.0.0:${server.address().port} (WebSocket /ws, 60 Hz / 20 Hz)`));
 function shutdown() {
   clearInterval(timer);
+  clearInterval(maintenance);
   for (const client of clients.values()) client.ws.close(1001, 'Server shutting down');
   wss.close(); server.close();
 }
