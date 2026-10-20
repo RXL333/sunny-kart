@@ -39,7 +39,7 @@ npm start
 
 服务器 60Hz 统一模拟、20Hz 发送快照；客户端 30Hz 发送输入，做本地预测与位置平滑，显示实测往返延迟。断线车辆由 AI 接管，房主离开自动移交。联机不暂停整个比赛，离开可以返回主菜单。
 
-公网后端采用 Render Free，配置已保存在 `render.yaml`；当前正在完成账号内的服务部署与公网验证。上线前，Pages 可单人游玩；本地和局域网好友房间可用。不同外网设备下的延迟尚未验收。
+公网后端已部署到 [Render Free](https://sunny-kart-server.onrender.com/health)，Pages 已接入好友联机。两个浏览器页面的创建、加入、开赛与加速已验证。当前测试线路往返延迟波动较大，独立设备和长期游玩体验仍待验收；单人模式在本地模拟，不依赖联机延迟。
 
 GitHub Pages 与后端分开部署的构建、环境变量和免费主机限制见 `docs/部署配置.md`。后端 endpoint 通过仓库 Actions variable `VITE_SERVER_URL` 配置；Pages 上不把 github.io 当作 WebSocket 服务器。新赛道与物理的实现、验收和部署范围见 `docs/地图物理升级.md`。
 
@@ -49,6 +49,7 @@ GitHub Pages 与后端分开部署的构建、环境变量和免费主机限制�
 - `assets/source/build_kart.py`：程序化建模脚本。
 - `public/models/`：原创 GLB 运行资产，每车低于 25k 三角面。
 - `npm test`：竞速规则与真实 WebSocket 集成测试。
+- `node scripts/check-public-server.mjs https://sunny-kart-server.onrender.com`：可选的真实公网双连接冒烟检查，会创建并清理自己的测试房间。
 - `docs/实施计划.md`、`docs/测试报告.md`：需求依据、完成范围与真实验证状态。
 
 素材与合成音效均为本项目原创；美术采取明亮圆润卡通方向。
