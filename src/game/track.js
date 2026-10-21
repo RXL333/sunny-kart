@@ -17,11 +17,83 @@ const zoneDefinitions = [
   { id: 'village', name: '橘子小镇', from: .84, to: 1, color: '#eaaa67', kind: 'village', subtitle: '港湾回程 · 冲向欢呼' },
 ];
 
+export const DEFAULT_TRACK_ID = 'sunny-island';
+export const TRACK_CATALOG = Object.freeze([
+  { id: DEFAULT_TRACK_ID, name: '晴空大环岛', subtitle: '海风、森林与小镇，一圈环游晴空。', description: '穿越五种风景，在长桥和山间弯道练习漂移。', difficulty: '标准', theme: DEFAULT_TRACK_ID, color: '#4cbfca', english: 'SUNSHINE ISLAND', feature: '海岛环游 · 经典全能' },
+  { id: 'candy-hills', name: '糖果丘陵', subtitle: '绕过奶油山丘，把每个弯开成甜甜圈。', description: '圆润的花瓣弯与缓缓起伏，沿糖果能量线寻找连续小喷的节奏。', difficulty: '轻松', theme: 'candy-hills', color: '#e99eb5', english: 'CANDY HILLS', feature: '花瓣连弯 · 起伏追风' },
+  { id: 'bay-loop', name: '晴风海湾', subtitle: '把氮气留给长直道，向着海平线出发。', description: '高速长直道连接宽缓回头弯，跨过海湾长桥后再来一次全速冲刺。', difficulty: '入门', theme: 'bay-loop', color: '#49b9d1', english: 'BREEZY BAY', feature: '高速海湾 · 氮气冲刺' },
+  { id: 'starlight-canyon', name: '星光峡谷', subtitle: '跟着星光连续漂移，穿过紫色峡谷。', description: '四组方向交替的峡谷弯道，挑战找准漂移时机与出弯加速。', difficulty: '进阶', theme: 'starlight-canyon', color: '#a89cdd', english: 'STARLIGHT CANYON', feature: '星光 S 弯 · 漂移挑战' },
+].map(entry => Object.freeze(entry)));
+
+// Polar control points keep each playful lobed circuit a simple closed loop.
+// Their smooth, low-amplitude elevation never creates a blind jump or drop.
+function petalControls(count, rx, rz, lobes, depth, elevation, amplitude) {
+  return Array.from({ length: count }, (_, i) => {
+    const a = -Math.PI / 2 + i / count * Math.PI * 2;
+    const radius = 1 + depth * Math.cos(lobes * (a + Math.PI / 2));
+    return [Math.cos(a) * rx * radius, Math.sin(a) * rz * radius, elevation + amplitude * (1 - Math.cos(a * 2 + Math.PI)) / 2];
+  });
+}
+
+const routes = {
+  [DEFAULT_TRACK_ID]: { controls, zones: zoneDefinitions, boosts: [.045, .135, .245, .365, .515, .655, .755, .895, .965] },
+  'candy-hills': {
+    controls: petalControls(36, 295, 245, 3, .12, 9, 13),
+    zones: [
+      ['糖霜起跑线', 'coast', '#f0acb8', '糖果大道 · 甜蜜出发'],
+      ['棉花糖树林', 'forest', '#a8d8b0', '圆润连弯 · 跟紧节奏'],
+      ['奶油小山丘', 'mountain', '#d4addf', '缓坡追风 · 抬头看云'],
+      ['饼干云桥', 'bridge', '#c5b9e8', '跨越糖河 · 连续小喷'],
+      ['甜甜圈小镇', 'village', '#ecb987', '糖粒直道 · 冲线欢呼'],
+    ],
+    boosts: [.045, .145, .255, .345, .445, .545, .645, .745, .845, .945],
+    coinGroups: 36, coinStyle: 'wave',
+  },
+  'bay-loop': {
+    controls: [
+      [-180, -248, 7], [-50, -250, 7], [100, -250, 7], [235, -238, 8],
+      [320, -180, 9], [347, -65, 11], [325, 62, 13], [263, 162, 16],
+      [163, 227, 18], [30, 245, 19], [-110, 244, 19], [-240, 218, 19],
+      [-320, 152, 18], [-349, 50, 17], [-337, -61, 14], [-288, -170, 10],
+    ],
+    zones: [
+      ['海风直道', 'coast', '#52c4d8', '长直道 · 氮气全开'],
+      ['椰林大回弯', 'forest', '#6cc7a1', '宽缓大弯 · 把握切线'],
+      ['望海缓坡', 'mountain', '#a2cbdc', '抬升海岸 · 看见远帆'],
+      ['珊瑚跨海桥', 'bridge', '#73c9e7', '蓝色长桥 · 向海冲刺'],
+      ['灯塔港湾', 'village', '#f1c584', '港湾回程 · 再次加速'],
+    ],
+    boosts: [.03, .065, .1, .28, .42, .49, .54, .72, .77, .89, .955],
+    coinGroups: 32, coinStyle: 'sweep',
+  },
+  'starlight-canyon': {
+    controls: petalControls(48, 290, 240, 4, .25, 12, 13),
+    zones: [
+      ['星尘出发台', 'coast', '#aaa4e4', '星光大道 · 追上夜风'],
+      ['发光蘑菇林', 'forest', '#7abdbb', '紫色连弯 · 留住漂移'],
+      ['紫晶 S 峡谷', 'mountain', '#b293db', '左右换向 · 连续挑战'],
+      ['银河天桥', 'bridge', '#8ba9e5', '跨越星河 · 抓住加速'],
+      ['月亮驿站', 'village', '#d0a5cc', '最后一弯 · 星光冲线'],
+    ],
+    boosts: [.065, .19, .315, .44, .565, .69, .815, .94],
+    coinGroups: 40, coinStyle: 'wave',
+  },
+};
+
+function routeZones(definition) {
+  if (definition === routes[DEFAULT_TRACK_ID]) return zoneDefinitions;
+  const boundaries = [0, .245, .405, .695, .84, 1];
+  return definition.zones.map(([name, kind, color, subtitle], index) => ({ id: kind, name, kind, color, subtitle, from: boundaries[index], to: boundaries[index + 1] }));
+}
+
 function catmull(a, b, c, d, t) {
   return 0.5 * ((2 * b) + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (-a + 3 * b - 3 * c + d) * t * t * t);
 }
 
-export function createTrack() {
+export function createTrack(id = DEFAULT_TRACK_ID) {
+  const metadata = TRACK_CATALOG.find(entry => entry.id === id);
+  if (!metadata) throw new RangeError(`Unknown track: ${String(id)}`);
+  const definition = routes[id], controls = definition.controls;
   const raw = [];
   const count = 6600;
   let length = 0;
@@ -35,7 +107,7 @@ export function createTrack() {
     if (i) length += Math.hypot(x - raw[i - 1].x, z - raw[i - 1].z);
     raw.push({ x, y, z, distance: length });
   }
-  const zones = zoneDefinitions.map(z => ({ ...z, start: z.from * length, end: z.to * length }));
+  const zones = routeZones(definition).map(z => ({ ...z, start: z.from * length, end: z.to * length }));
   const zoneAt = distance => { const d = mod(distance, length); return zones.find(z => d >= z.start && d < z.end) || zones[0]; };
 
   const at = distance => {
@@ -61,9 +133,13 @@ export function createTrack() {
   const points = Array.from({ length: pointCount + 1 }, (_, i) => ({ distance: i * length / pointCount, ...sample(i * length / pointCount) }));
   const minX = Math.min(...raw.map(p => p.x)), maxX = Math.max(...raw.map(p => p.x)), minZ = Math.min(...raw.map(p => p.z)), maxZ = Math.max(...raw.map(p => p.z));
   const bounds = { minX, maxX, minZ, maxZ, width: maxX - minX, depth: maxZ - minZ, centerX: (maxX + minX) / 2, centerZ: (maxZ + minZ) / 2 };
-  const boostPads = [.045, .135, .245, .365, .515, .655, .755, .895, .965].map((u, id) => ({ id: `boost-${id}`, distance: u * length, lane: id % 3 === 0 ? -2.5 : 2.5 }));
-  const coins = Array.from({ length: 32 }, (_, i) => [0, 4.5, 9].map((gap, j) => ({ id: `energy-${i}-${j}`, distance: (i + .5) / 32 * length + gap, lane: i % 2 ? -2.4 : 2.4 }))).flat();
-  return { name: '晴空大环岛', length, width: 16, railOffset: 11, sample, points, controlPoints: controls.map(p => [p[0], p[1]]), bounds, mapScale: Math.max(bounds.width, bounds.depth), zones, zoneAt, boostPads, coins, energyCrystals: coins, itemBoxes: [] };
+  const boostPads = definition.boosts.map((u, index) => ({ id: `boost-${index}`, distance: u * length, lane: index % 3 === 0 ? -2.5 : 2.5 }));
+  const coinGroups = definition.coinGroups ?? 32;
+  const coins = Array.from({ length: coinGroups }, (_, i) => [0, 4.5, 9].map((gap, j) => {
+    const lane = definition.coinStyle === 'wave' ? Math.sin((i * 3 + j) * .38) * 3.6 : definition.coinStyle === 'sweep' ? (i % 4 < 2 ? -2.7 : 2.7) : i % 2 ? -2.4 : 2.4;
+    return { id: `energy-${i}-${j}`, distance: (i + .5) / coinGroups * length + gap, lane };
+  })).flat();
+  return { ...metadata, length, width: 16, railOffset: 11, sample, points, controlPoints: controls.map(p => [p[0], p[1]]), bounds, mapScale: Math.max(bounds.width, bounds.depth), zones, zoneAt, boostPads, coins, energyCrystals: coins, itemBoxes: [] };
 }
 
 export const track = createTrack();

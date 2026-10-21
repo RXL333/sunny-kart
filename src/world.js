@@ -5,6 +5,12 @@ import { createTerrainSampler, MAP_LAYOUT } from './game/map-layout.js';
 import { viewportProfile, cameraFov, chaseFraming, chaseEye } from './viewport.js';
 
 const PALETTE = [0xf59e42, 0x41bfa2, 0x9982df, 0xf4ce51, 0xef718c, 0x54b4df, 0xdba16b, 0x7bbd66];
+const THEMES = {
+  'sunny-island': { sky:0xb8e9f5, sea:0x62c9d4, green:0x8acb70, sand:0xf3dfa3, deep:0x58c4c9, high:0x7eb78d, hemisphere:0xc7f2ff, ground:0xa9b887, sun:0xfff1cc, exposure:1.18, banner:'SUNNY CUP', colors:{} },
+  'candy-hills': { sky:0xf6dced, sea:0xd9a9d1, green:0xa5d9b1, sand:0xffe1ae, deep:0xc7a9dc, high:0xf5a6ca, hemisphere:0xffedf7, ground:0xbebf9a, sun:0xffedcc, exposure:1.13, banner:'SWEET CUP', colors:{grass:0xa5d9b1,road:0x897788,red:0xf58ea7,sand:0xffe1ae,trunk:0xffe9c8,leaf:0xf3a3c5,leaf2:0xa0dfcd,teal:0x8bcdb9,yellow:0xffdc86} },
+  'bay-loop': { sky:0xb3eaf9, sea:0x29bdcf, green:0x8fd184, sand:0xffe5ad, deep:0x27b8c6, high:0x6dbd9e, hemisphere:0xd5f8ff, ground:0xb3c493, sun:0xffefcc, exposure:1.16, banner:'BAY GRAND PRIX', colors:{grass:0x8fd184,road:0x6a8085,red:0xffa06b,sand:0xffe5ad,leaf:0x45b68d,leaf2:0x96d894,teal:0x26b8c6,yellow:0xffd772} },
+  'starlight-canyon': { sky:0x242e53, sea:0x344c81, green:0x7688a7, sand:0xc3acce, deep:0x394f83, high:0x9f83b3, hemisphere:0xc3d6ff, ground:0x797798, sun:0xd4dcff, exposure:1.18, banner:'STARLIGHT CUP', colors:{grass:0x8996af,road:0x8795ae,white:0xfff0d8,red:0xc29ce5,sand:0xc3acce,trunk:0x8585a8,leaf:0xa5a0d2,leaf2:0x91b6cd,teal:0x8abed6,yellow:0xffdfa0} },
+};
 const mat = (color, roughness = .72) => new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
 const _v = new THREE.Vector3();
 function mesh(geo, material, x=0, y=0, z=0, parent) {
@@ -23,32 +29,59 @@ function label(text, bg='#fff8dc', fg='#143e49', width=512, height=128) {
   return new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide});
 }
 
+function resources(roots) {
+  const geometries=new Set(),materials=new Set(),textures=new Set();
+  for(const root of roots.filter(Boolean))root.traverse(object=>{
+    if(object.geometry)geometries.add(object.geometry);
+    for(const material of Array.isArray(object.material)?object.material:[object.material])if(material){
+      materials.add(material);
+      for(const value of Object.values(material))if(value?.isTexture)textures.add(value);
+    }
+  });
+  return {geometries,materials,textures};
+}
+function releaseResources(roots,extraMaterials=[]) {
+  const found=resources(roots);
+  for(const material of extraMaterials)found.materials.add(material);
+  for(const texture of found.textures)texture.dispose();
+  for(const geometry of found.geometries)geometry.dispose();
+  for(const material of found.materials)material.dispose();
+}
+function starGeometry() {
+  const shape=new THREE.Shape();
+  for(let i=0;i<10;i++){const a=i*Math.PI/5+Math.PI/2,r=i%2?.47:1,x=Math.cos(a)*r,y=Math.sin(a)*r;i?shape.lineTo(x,y):shape.moveTo(x,y);}
+  shape.closePath();return new THREE.ExtrudeGeometry(shape,{depth:.2,steps:1,bevelEnabled:false});
+}
+
 export class World {
-  constructor(canvas,track) {
-    this.track=track; this.time=0; this.overview=false; this.karts=[]; this.windmills=[]; this.clouds=[]; this.particles=[];this.graphicsQuality='auto';
+  constructor(canvas,track,{createRenderer=options=>new THREE.WebGLRenderer(options)}={}) {
+    this.track=track;this.theme=THEMES[track.theme]??THEMES[track.id]??THEMES['sunny-island'];this.themeId=THEMES[track.theme]?track.theme:THEMES[track.id]?track.id:'sunny-island';this.disposed=false;
+    this.time=0; this.overview=false; this.karts=[]; this.windmills=[]; this.clouds=[]; this.particles=[];this.graphicsQuality='auto';
     this.terrainSampler=createTerrainSampler(track);
-    this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+    this.renderer=createRenderer({canvas,antialias:true,powerPreference:'high-performance'});
     this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
-    this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.18;
-    this.scene=new THREE.Scene();this.scene.background=new THREE.Color(0xb8e9f5);
-    this.scene.fog=new THREE.Fog(0xb8e9f5,330,1250);
+    this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=this.theme.exposure;
+    this.scene=new THREE.Scene();this.scene.background=new THREE.Color(this.theme.sky);
+    this.scene.fog=new THREE.Fog(this.theme.sky,330,1250);
     this.camera=new THREE.PerspectiveCamera(52,1,.15,1900);
-    this.scene.add(new THREE.HemisphereLight(0xc7f2ff,0xa9b887,2.25));
-    const sun=new THREE.DirectionalLight(0xfff1cc,3.1);sun.position.set(-65,130,-45);sun.castShadow=true;
+    this.scene.add(new THREE.HemisphereLight(this.theme.hemisphere,this.theme.ground,2.25));
+    const sun=new THREE.DirectionalLight(this.theme.sun,this.themeId==='starlight-canyon'?2.4:3.1);sun.position.set(-65,130,-45);sun.castShadow=true;
     sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-78;sun.shadow.camera.right=78;
     sun.shadow.camera.top=78;sun.shadow.camera.bottom=-78;sun.shadow.camera.far=390;
     sun.shadow.normalBias=.055;sun.shadow.bias=-.0002;this.scene.add(sun);this.scene.add(sun.target);this.sun=sun;
     this.materials={grass:mat(0x83c56b),road:mat(0x627178),white:mat(0xfff7dd),red:mat(0xf28364),sand:mat(0xf1dfaa),dark:mat(0x203e49),trunk:mat(0x9f7760),leaf:mat(0x52aa64),leaf2:mat(0x91ca69),yellow:mat(0xffdf69),teal:mat(0x46bba9)};
+    for(const [key,color] of Object.entries(this.theme.colors))this.materials[key].color.setHex(color);
     this.buildIsland();this.buildRoad();this.buildBridge();this.buildScenery();this.buildStart();this.buildPickups();
     this.resize();const start=this.track.sample(0);this.camera.position.set(start.x+start.tx*8.5+start.nx*8,start.y+5.4,start.z+start.tz*8.5+start.nz*8);this.camera.lookAt(start.x,start.y+1.2,start.z);
-    this.queueResize=()=>{if(this.resizeRequest)return;this.resizeRequest=requestAnimationFrame(()=>{this.resizeRequest=0;this.resize();});};
+    this.queueResize=()=>{if(this.disposed||this.resizeRequest)return;this.resizeRequest=requestAnimationFrame(()=>{this.resizeRequest=0;if(!this.disposed)this.resize();});};
     window.addEventListener('resize',this.queueResize);window.addEventListener('orientationchange',this.queueResize);
     window.visualViewport?.addEventListener('resize',this.queueResize);
     document.addEventListener('fullscreenchange',this.queueResize);document.addEventListener('webkitfullscreenchange',this.queueResize);
     if(typeof ResizeObserver!=='undefined'){this.canvasResize=new ResizeObserver(this.queueResize);this.canvasResize.observe(canvas);}
   }
   resize(){
+    if(this.disposed)return;
     const profile=viewportProfile({rect:this.renderer.domElement.getBoundingClientRect(),visualViewport:window.visualViewport||{},width:innerWidth,height:innerHeight,pixelRatio:window.devicePixelRatio||1,touch:Boolean(window.matchMedia?.('(any-pointer: coarse)').matches||navigator.maxTouchPoints>0),quality:this.graphicsQuality});
     const previous=this.viewport;
     if(previous&&previous.width===profile.width&&previous.height===profile.height&&previous.pixelRatio===profile.pixelRatio&&previous.shadowSize===profile.shadowSize)return;
@@ -63,9 +96,9 @@ export class World {
   terrainHeight(x,z){return this.terrainSampler.terrainHeight(x,z);}
   buildIsland(){
     const seaGeo=new THREE.PlaneGeometry(4000,4000);seaGeo.rotateX(-Math.PI/2);
-    this.sea=mesh(seaGeo,mat(0x62c9d4,.3),0,-.55,0,this.scene);this.sea.receiveShadow=false;
+    this.sea=mesh(seaGeo,mat(this.theme.sea,.3),0,-.55,0,this.scene);this.sea.receiveShadow=false;
     const {width,depth,chunksX,chunksZ,segments}=MAP_LAYOUT.terrain;
-    const green=new THREE.Color(0x8acb70),sand=new THREE.Color(0xf3dfa3),deep=new THREE.Color(0x58c4c9),high=new THREE.Color(0x7eb78d);
+    const green=new THREE.Color(this.theme.green),sand=new THREE.Color(this.theme.sand),deep=new THREE.Color(this.theme.deep),high=new THREE.Color(this.theme.high);
     const terrainMaterial=new THREE.MeshStandardMaterial({vertexColors:true,roughness:1});
     for(let cx=0;cx<chunksX;cx++)for(let cz=0;cz<chunksZ;cz++){
       const terrain=new THREE.PlaneGeometry(width/chunksX,depth/chunksZ,segments,segments);terrain.rotateX(-Math.PI/2);
@@ -83,7 +116,7 @@ export class World {
   }
   buildRoad(){
     const half=this.track.width/2;
-    const verge=mat(0x70b16a);this.ribbon(-11.6,-half,-.045,verge);this.ribbon(half,11.6,-.045,verge);this.ribbon(-half,half,.01,this.materials.road);
+    const verge=mat(this.themeId==='sunny-island'?0x70b16a:this.theme.green);this.ribbon(-11.6,-half,-.045,verge);this.ribbon(half,11.6,-.045,verge);this.ribbon(-half,half,.01,this.materials.road);
     this.ribbon(-half+.4,-half+.58,.028,this.materials.white);this.ribbon(half-.58,half-.4,.028,this.materials.white);
     const curbGeo=new THREE.BoxGeometry(.85,.16,3.05),total=Math.floor(this.track.length/3);
     const curbs=[new THREE.InstancedMesh(curbGeo,this.materials.red,total+2),new THREE.InstancedMesh(curbGeo,this.materials.white,total+2)];const counts=[0,0];const dummy=new THREE.Object3D();
@@ -115,16 +148,19 @@ export class World {
     rail.castShadow=true;rail.receiveShadow=true;this.scene.add(rail);this.instances(new THREE.BoxGeometry(1,1,1),this.materials.teal,posts);
   }
   buildBridge(){
-    const length=this.track.length,start=.713*length,end=.829*length;
+    const length=this.track.length,zone=this.track.zones.find(zone=>zone.kind==='bridge');
+    if(!zone)return;
+    const themed=this.themeId!=='sunny-island',start=themed?zone.start+(zone.end-zone.start)*.04:.713*length,end=themed?zone.end-(zone.end-zone.start)*.05:.829*length;
     this.ribbon(-11.55,11.55,-.25,this.materials.white,start,end);
     const supports=[];
     for(let d=start;d<end;d+=17){const p=this.track.sample(d);for(const s of [-1,1])supports.push({x:p.x+p.nx*10.4*s,y:(p.y-3)/2,z:p.z+p.nz*10.4*s,sx:1.2,sy:p.y+3,sz:1.35});}
     this.instances(new THREE.BoxGeometry(1,1,1),mat(0xabc6bc),supports);
-    const a=.735*length,b=.808*length;
+    const a=themed?start+(end-start)*.18:.735*length,b=themed?end-(end-start)*.18:.808*length;
     for(const d of [a,b]){const p=this.track.sample(d),g=new THREE.Group();g.position.set(p.x,p.y,p.z);g.rotation.y=p.heading;this.scene.add(g);for(const s of [-1,1]){box(g,s*11,9.5,0,1.5,20,1.8,this.materials.teal);ball(g,s*11,20,0,1,1,1,this.materials.yellow);}box(g,0,16.5,0,22,1.2,1.4,this.materials.teal);}
     for(const s of [-1,1]){const points=[],hangers=[];for(let i=0;i<=32;i++){const t=i/32,p=this.track.sample(a+(b-a)*t),height=3+16*(2*t-1)**2;points.push(new THREE.Vector3(p.x+p.nx*11*s,p.y+height,p.z+p.nz*11*s));if(i%2===0)hangers.push({x:p.x+p.nx*11*s,y:p.y+(height+1.25)/2,z:p.z+p.nz*11*s,sx:.1,sy:height-1.25,sz:.1});}const curve=new THREE.CatmullRomCurve3(points);mesh(new THREE.TubeGeometry(curve,100,.11,5,false),this.materials.white,0,0,0,this.scene);this.instances(new THREE.BoxGeometry(1,1,1),this.materials.white,hangers);}
   }
   buildScenery(){
+    if(this.themeId!=='sunny-island'){this.buildThemedScenery();this.buildRouteSigns();return;}
     let seed=94827;const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
     const trunkGeo=new THREE.CylinderGeometry(.32,.48,1,7),leafGeo=new THREE.SphereGeometry(1,10,7),pineGeo=new THREE.ConeGeometry(1,1,7);
     for(const zone of this.track.zones){const trunks=[],round=[],light=[],pines=[];const count={coast:90,forest:650,mountain:380,bridge:40,village:140}[zone.kind];
@@ -144,8 +180,121 @@ export class World {
     this.buildCoastLandmarks();
     const clouds=[];for(let i=0;i<34;i++){const a=i/34*Math.PI*2,r=470+random()*270,y=85+random()*90;for(let j=0;j<4;j++)clouds.push({x:Math.cos(a)*r+(j-1.5)*11,y:y+Math.sin(j*2)*3,z:Math.sin(a)*r,sx:14,sy:8+random()*6,sz:10});}this.instances(leafGeo,new THREE.MeshBasicMaterial({color:0xfffdf4}),clouds,false);
     const rocks=[],flowers=[],flowersWhite=[];for(let i=0;i<850;i++){const p=this.track.sample(random()*this.track.length),k=(13.8+random()*20)*(random()>.5?1:-1),x=p.x+p.nx*k,z=p.z+p.nz*k,h=this.terrainHeight(x,z);if(h<1.5||this.nearest(x,z).d<12.8)continue;if(i%4===0){const size=.6+random()*1.7;rocks.push({x,y:h+.35*size,z,sx:size,sy:size*.7,sz:size,ry:random()*6});}else(i%2?flowers:flowersWhite).push({x,y:h+.27,z,sx:.26,sy:.31,sz:.26});}this.instances(new THREE.DodecahedronGeometry(1),mat(0xb2c5b3),rocks);this.instances(leafGeo,this.materials.yellow,flowers,false);this.instances(leafGeo,this.materials.white,flowersWhite,false);
+    this.buildRouteSigns();
+  }
+  buildRouteSigns(){
     for(let d=35;d<this.track.length;d+=54){const p=this.track.sample(d);if(Math.abs(p.curvature)<.006)continue;const side=p.curvature>0?-1:1,g=new THREE.Group();g.position.set(p.x+p.nx*13.2*side,p.y,p.z+p.nz*13.2*side);g.rotation.y=p.heading;this.scene.add(g);box(g,0,1.6,0,.18,3.2,.18,this.materials.dark);box(g,0,3.1,0,3.2,1.3,.18,this.materials.yellow);for(let j=-1;j<=1;j++){const sign=box(g,j*.75,3.1,-.11,.18,.85,.025,this.materials.dark);sign.rotation.z=(p.curvature>0?1:-1)*-.55;}}
     for(const zone of this.track.zones.slice(1)){const p=this.track.sample(zone.start+18),g=new THREE.Group();g.position.set(p.x+p.nx*15,p.y,p.z+p.nz*15);g.rotation.y=p.heading;this.scene.add(g);box(g,0,2.8,0,.24,5.6,.24,this.materials.dark);box(g,0,4.7,0,7,1.8,.2,this.materials.white);mesh(new THREE.PlaneGeometry(6.6,1.5),label(zone.name),0,4.7,-.12,g).rotation.y=Math.PI;mesh(new THREE.PlaneGeometry(6.6,1.5),label(zone.name),0,4.7,.12,g);}
+  }
+  buildThemedScenery(){
+    let seed={ 'candy-hills':8241,'bay-loop':48125,'starlight-canyon':19271 }[this.themeId];
+    const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+    const roundGeo=new THREE.SphereGeometry(1,10,7),stemGeo=new THREE.CylinderGeometry(.32,.46,1,7),crystalGeo=new THREE.OctahedronGeometry(1),rockGeo=new THREE.DodecahedronGeometry(1,0);
+    const stems=[],round=[],alternate=[],leaves=[],rocks=[],flowers=[];
+    const candy=this.themeId==='candy-hills',night=this.themeId==='starlight-canyon';
+    // Decorations use the nearest road, not only their source sample, so close
+    // neighbouring turns retain a clear, consistent driving corridor.
+    for(let i=0;i<260;i++){
+      const p=this.track.sample(random()*this.track.length),side=random()>.5?1:-1,k=(19+random()*62)*side,x=p.x+p.nx*k,z=p.z+p.nz*k,near=this.nearest(x,z),h=this.terrainSampler.terrainHeight(x,z,near);
+      if(h<.7||near.d<17)continue;
+      const size=.8+random()*1.3;
+      if(candy){
+        stems.push({x,y:h+3.1*size,z,sx:.9*size,sy:6.2*size,sz:.9*size});
+        (i%2?round:alternate).push({x,y:h+6.9*size,z,sx:2.7*size,sy:2.7*size,sz:1.1*size,ry:p.heading+random()});
+        if(i%4===0)leaves.push({x,y:h+6.9*size,z,sx:2.9*size,sy:2.9*size,sz:1.1*size,ry:p.heading+.5});
+      }else if(night){
+        (i%2?round:alternate).push({x,y:h+3.4*size,z,sx:1.8*size,sy:5.2*size,sz:1.8*size,ry:random()*6});
+        if(i%3===0)rocks.push({x:x+2.1,y:h+2.2*size,z:z+.8,sx:2.8*size,sy:3.1*size,sz:2.7*size,ry:random()*6});
+      }else{
+        stems.push({x,y:h+4.2*size,z,sx:.8*size,sy:8.4*size,sz:.8*size,rz:side*.075});
+        for(let j=0;j<5;j++){const a=j/5*Math.PI*2;leaves.push({x:x+Math.sin(a)*2.2*size,y:h+8.4*size,z:z+Math.cos(a)*2.2*size,sx:1.1*size,sy:.25*size,sz:3.6*size,ry:a,rx:.18});}
+        if(i%3===0)rocks.push({x:x+2,y:h+.8*size,z:z+2,sx:1.7*size,sy:1.1*size,sz:1.7*size});
+      }
+    }
+    if(candy){
+      this.instances(stemGeo,this.materials.white,stems);
+      this.instances(roundGeo,this.materials.leaf,round);this.instances(roundGeo,this.materials.leaf2,alternate);
+      this.instances(new THREE.TorusGeometry(1,.12,5,16),this.materials.white,leaves);
+      for(const [i,u] of [.12,.36,.58,.9].entries())this.buildThemeGate(u,i);
+      const scoops=[],bases=[],sprinkles=[];
+      for(let i=0;i<24;i++){
+        const p=this.track.sample((i+.4)/24*this.track.length),side=i%2?1:-1,k=43+(i%3)*13,x=p.x+p.nx*k*side,z=p.z+p.nz*k*side,near=this.nearest(x,z),h=this.terrainSampler.terrainHeight(x,z,near);
+        if(h<.7||near.d<30)continue;
+        const size=3.5+i%3;bases.push({x,y:h+size*.7,z,sx:size,sy:size*1.4,sz:size});
+        scoops.push({x,y:h+size*1.6,z,sx:size*1.15,sy:size*.85,sz:size*1.15});
+        sprinkles.push({x:x+.6,y:h+size*2.4,z,sx:.45,sy:.45,sz:.45});
+      }
+      this.instances(new THREE.CylinderGeometry(.8,1,1,9),this.materials.sand,bases);
+      this.instances(roundGeo,this.materials.leaf,scoops);this.instances(roundGeo,this.materials.red,sprinkles);
+    }else if(night){
+      const glow=new THREE.MeshStandardMaterial({color:0x93d7ef,emissive:0x4f9cd3,emissiveIntensity:.55,roughness:.45});
+      const lavender=new THREE.MeshStandardMaterial({color:0xc7a9ef,emissive:0x8972b9,emissiveIntensity:.35,roughness:.55});
+      this.instances(crystalGeo,glow,round);this.instances(crystalGeo,lavender,alternate);this.instances(rockGeo,mat(0x777b9c),rocks);
+      const towers=[];
+      for(let i=0;i<42;i++){
+        const p=this.track.sample((i+.2)/42*this.track.length),side=i%2?1:-1,k=48+(i%4)*10,x=p.x+p.nx*k*side,z=p.z+p.nz*k*side,near=this.nearest(x,z),h=this.terrainSampler.terrainHeight(x,z,near);
+        if(near.d<36||h<.5)continue;
+        const height=16+i%5*5;towers.push({x,y:h+height*.42,z,sx:5+i%4,sy:height*.6,sz:5+i%3,ry:i*.7});
+      }
+      this.instances(rockGeo,mat(0x8c86a8),towers);
+      const stars=[];for(let i=0;i<120;i++){const a=random()*Math.PI*2,r=410+random()*380,size=.7+random()*1.4;stars.push({x:Math.cos(a)*r,y:90+random()*175,z:Math.sin(a)*r,sx:size,sy:size,sz:.5,ry:a});}
+      this.instances(starGeometry(),new THREE.MeshBasicMaterial({color:0xffe7af,side:THREE.DoubleSide}),stars,false);
+      const moon=mesh(new THREE.SphereGeometry(23,16,12),new THREE.MeshBasicMaterial({color:0xffefd0}),this.track.bounds.centerX+250,150,this.track.bounds.centerZ-380,this.scene);moon.castShadow=false;
+      for(const [i,u] of [.16,.42,.65,.91].entries())this.buildThemeGate(u,i);
+    }else{
+      this.instances(stemGeo,this.materials.trunk,stems);this.instances(roundGeo,this.materials.leaf,leaves);this.instances(rockGeo,mat(0xbad5c4),rocks);
+      this.buildCoastLandmarks();
+      for(let i=0;i<22;i++){
+        const p=this.track.sample((i+.3)/22*this.track.length),side=i%2?1:-1,k=24+i%3*7,x=p.x+p.nx*k*side,z=p.z+p.nz*k*side,near=this.nearest(x,z),h=this.terrainSampler.terrainHeight(x,z,near);
+        if(h<1||near.d<19)continue;
+        this.beachHut(x,h,z,p.heading,[0xffc07c,0x8acfd7,0xf3b7c2,0xc8dc9b][i%4]);
+      }
+      const floats=[],caps=[];
+      for(let i=0;i<55;i++){
+        const p=this.track.sample((i+.2)/55*this.track.length),side=i%2?1:-1,k=28+i%5*9,x=p.x+p.nx*k*side,z=p.z+p.nz*k*side,near=this.nearest(x,z);
+        if(near.d<23||this.terrainSampler.terrainHeight(x,z,near)>-.65)continue;
+        floats.push({x,y:.1,z,sx:1.25,sy:1,sz:1.25});caps.push({x,y:1.15,z,sx:.7,sy:1.5,sz:.7});
+      }
+      this.instances(new THREE.TorusGeometry(1,.3,6,12),this.materials.white,floats.map(p=>({...p,rx:Math.PI/2})));
+      this.instances(new THREE.ConeGeometry(1,1,7),this.materials.red,caps);
+      for(const [i,u] of [.1,.38,.62,.9].entries())this.buildThemeGate(u,i);
+    }
+    if(!night){
+      const clouds=[];for(let i=0;i<20;i++){const a=i/20*Math.PI*2,r=470+random()*220,y=90+random()*75;for(let j=0;j<3;j++)clouds.push({x:Math.cos(a)*r+(j-1)*14,y:y+(j%2)*5,z:Math.sin(a)*r,sx:17,sy:9+random()*6,sz:12});}
+      this.instances(roundGeo,new THREE.MeshBasicMaterial({color:candy?0xfff1ed:0xfffdf3}),clouds,false);
+    }
+    for(let i=0;i<380;i++){
+      const p=this.track.sample(random()*this.track.length),k=(14+random()*10)*(i%2?1:-1),x=p.x+p.nx*k,z=p.z+p.nz*k,near=this.nearest(x,z),h=this.terrainSampler.terrainHeight(x,z,near);
+      if(h<.8||near.d<13.5)continue;flowers.push({x,y:h+.35,z,sx:.3,sy:night?.65:.35,sz:.3,ry:random()*6});
+    }
+    this.instances(night?crystalGeo:roundGeo,this.materials.yellow,flowers,false);
+    // A geometry that generated no instances never belongs to the scene.
+    for(const geometry of [roundGeo,stemGeo,crystalGeo,rockGeo])if(![...this.scene.children].some(object=>object.geometry===geometry))geometry.dispose();
+  }
+  buildThemeGate(fraction,index){
+    const p=this.track.sample(fraction*this.track.length);
+    if(Math.abs(p.curvature)>.035)return;
+    const g=new THREE.Group();g.position.set(p.x,p.y,p.z);g.rotation.set(-p.pitch,p.heading,0,'YXZ');this.scene.add(g);
+    const candy=this.themeId==='candy-hills',night=this.themeId==='starlight-canyon';
+    if(candy||night){
+      for(const side of [-1,1])mesh(new THREE.CylinderGeometry(.7,.9,8,8),this.materials.white,side*13,4,0,g);
+      const arch=mesh(new THREE.TorusGeometry(13,.7,6,36,Math.PI),candy?this.materials.red:this.materials.teal,0,8,0,g);arch.castShadow=false;
+      if(night){const star=mesh(starGeometry(),new THREE.MeshStandardMaterial({color:0xffdf8e,emissive:0xffb95e,emissiveIntensity:.6}),0,22.1,0,g);star.scale.setScalar(2);}
+      else for(const side of [-1,1])ball(g,side*13,8,0,1.4,1.4,1.4,index%2?this.materials.leaf:this.materials.leaf2);
+    }else{
+      for(const side of [-1,1]){mesh(new THREE.CylinderGeometry(.38,.45,11,8),this.materials.white,side*13.5,5.5,0,g);const flag=mesh(new THREE.ConeGeometry(2.2,4,3),index%2?this.materials.red:this.materials.yellow,side*13.5,11,0,g);flag.scale.z=.09;}
+      box(g,0,9.7,0,28,.45,.5,this.materials.teal);
+      for(let i=-5;i<=5;i++){const pennant=mesh(new THREE.ConeGeometry(.55,1.3,3),i%2?this.materials.red:this.materials.yellow,i*2.2,8.85,0,g);pennant.rotation.z=Math.PI;pennant.scale.z=.08;}
+    }
+  }
+  beachHut(x,y,z,heading,color){
+    const g=new THREE.Group();g.position.set(x,y,z);g.rotation.y=heading;this.scene.add(g);
+    const paint=mat(color);box(g,0,1.8,0,4.8,3.6,4.2,paint);
+    const roof=mesh(new THREE.ConeGeometry(4.1,1.7,4),this.materials.white,0,4.2,0,g);roof.rotation.y=Math.PI/4;
+    for(const side of [-1,1])box(g,side*1.7,2,2.13,.65,2.7,.08,this.materials.white);
+    box(g,0,1.3,2.15,1.2,2.6,.09,this.materials.teal);
+    box(g,0,.2,3.2,5.5,.4,2.8,this.materials.sand);
+    box(g,-3.2,1.2,1.5,.45,2.4,1.6,this.materials.red).rotation.z=-.17;
   }
   buildCoastLandmarks(){
     const p=this.track.sample(this.track.length*.182),x=p.x+p.nx*43,z=p.z+p.nz*43,h=this.terrainHeight(x,z),base=Math.max(1.4,h),g=new THREE.Group();g.position.set(x,base,z);this.scene.add(g);
@@ -159,8 +308,8 @@ export class World {
   buildStart(){
     const p=this.track.sample(0),g=new THREE.Group();g.position.set(p.x,p.y,p.z);g.rotation.y=p.heading;this.scene.add(g);
     for(const s of [-1,1]){mesh(new THREE.CylinderGeometry(.42,.6,8,12),this.materials.teal,s*11.5,4,0,g);ball(g,s*11.5,8.3,0,.75,.75,.75,this.materials.yellow);}
-    box(g,0,7.6,0,23.7,1.7,.6,this.materials.white);const banner=mesh(new THREE.PlaneGeometry(12,1.28),label('SUNNY CUP'),0,7.65,-.32,g);banner.rotation.y=Math.PI;
-    mesh(new THREE.PlaneGeometry(12,1.28),label('SUNNY CUP'),0,7.65,.32,g);
+    box(g,0,7.6,0,23.7,1.7,.6,this.materials.white);const bannerMaterial=label(this.theme.banner);const banner=mesh(new THREE.PlaneGeometry(12,1.28),bannerMaterial,0,7.65,-.32,g);banner.rotation.y=Math.PI;
+    mesh(new THREE.PlaneGeometry(12,1.28),bannerMaterial,0,7.65,.32,g);
     for(let x=0;x<16;x++)for(let z=0;z<2;z++)box(g,x-7.5,.045,z*.65-.33,1,.025,.65,(x+z)%2?this.materials.dark:this.materials.white);
     for(const s of [-1,1]){const stand=box(g,s*18.5,1.5,-8,7,3,15,this.materials.white);for(let row=0;row<3;row++)box(g,s*18.5,3.4+row*.65,-8+row*2.5,7,.7,2,this.materials.teal);for(let j=0;j<6;j++)ball(g,s*18.5+(j%2?1.7:-1.7),3.6+(j%3)*.5,-12+j*1.7,.5,.65,.5,mat(PALETTE[j]));}
     this.startSample=p;
@@ -177,18 +326,42 @@ export class World {
     return {group:g,wheels,paint};
   }
   async createKarts(){
-    for(let i=0;i<8;i++){const visual=this.fallbackKart(i===0?0x42bbbd:PALETTE[i]);const root=new THREE.Group();root.add(visual.group);this.scene.add(root);this.karts.push({...visual,root});}
-    try{const loader=new GLTFLoader(),base=import.meta.env.BASE_URL;const models=await Promise.all(['models/kart.glb','models/kart-rabbit.glb','models/kart-panda.glb'].map(url=>loader.loadAsync(`${base}${url}`)));this.models={fox:optimizeModel(models[0].scene),rabbit:optimizeModel(models[1].scene),panda:optimizeModel(models[2].scene)};this.assetLoaded=true;
-    }catch(e){console.warn('Model unavailable, using built-in kart',e.message);this.assetLoaded=false;}
+    if(this.disposed||this.karts.length)return;
+    for(let i=0;i<8;i++){
+      const visual=this.fallbackKart(i===0?0x42bbbd:PALETTE[i]),owned=resources([visual.group]);
+      for(const material of Object.values(this.materials))owned.materials.delete(material);
+      const root=new THREE.Group();root.add(visual.group);this.scene.add(root);this.karts.push({...visual,root,owned});
+    }
+    const loader=new GLTFLoader(),base=import.meta.env.BASE_URL;
+    // Wait for every request, including failures, so switching tracks mid-load
+    // cannot leave a late fulfilled model alive outside the disposed scene.
+    const results=await Promise.allSettled(['models/kart.glb','models/kart-rabbit.glb','models/kart-panda.glb'].map(url=>loader.loadAsync(`${base}${url}`)));
+    const sources=results.filter(result=>result.status==='fulfilled').map(result=>result.value.scene);
+    if(this.disposed){releaseResources(sources);return;}
+    if(results.some(result=>result.status==='rejected')){releaseResources(sources);this.assetLoaded=false;console.warn('Model unavailable, using built-in kart');return;}
+    const models={};
+    try{
+      for(const [i,character] of ['fox','rabbit','panda'].entries())models[character]=optimizeModel(sources[i]);
+      // Optimized meshes retain the materials, but have their own geometry.
+      for(const geometry of resources(sources).geometries)geometry.dispose();
+      this.models=models;this.assetLoaded=true;
+    }catch(error){releaseResources([...sources,...Object.values(models)]);this.assetLoaded=false;console.warn('Model unavailable, using built-in kart',error.message);}
   }
   setLineup(racers){
+    if(this.disposed)return;
     for(let i=0;i<this.karts.length;i++){const r=racers[i],k=this.karts[i];if(!r)continue;
-      if(this.models){const model=(this.models[r.character]??this.models.fox).clone(true),wheels=[];model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material?.name==='KartPaint'){o.material=o.material.clone();o.material.color.set(r.color??PALETTE[i]);}}if(o.name.startsWith('Wheel')&&o.isGroup)wheels.push(o);});k.root.remove(k.group);k.root.add(model);k.group=model;k.wheels=wheels;}
+      if(this.models&&(k.character!==r.character||k.color!==r.color)){
+        const model=(this.models[r.character]??this.models.fox).clone(true),wheels=[],owned={geometries:new Set(),materials:new Set(),textures:new Set()};
+        model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;const recolor=material=>{if(material?.name!=='KartPaint')return material;const paint=material.clone();paint.color.set(r.color??PALETTE[i]);owned.materials.add(paint);return paint;};o.material=Array.isArray(o.material)?o.material.map(recolor):recolor(o.material);}if(o.name.startsWith('Wheel')&&o.isGroup)wheels.push(o);});
+        k.root.remove(k.group);for(const geometry of k.owned.geometries)geometry.dispose();for(const material of k.owned.materials)material.dispose();
+        k.root.add(model);k.group=model;k.wheels=wheels;k.owned=owned;k.character=r.character;k.color=r.color;
+      }
       k.lastDistance=r.distance;
     }
   }
   setCharacter(character){const color={fox:0x43b9bb,rabbit:0x88c58d,panda:0x9d88d3}[character]??0x43b9bb;this.karts[0]?.group.traverse(o=>{if(o.isMesh&&o.material?.name==='KartPaint')o.material.color.setHex(color);});}
   update(dt,race,menu=false){
+    if(this.disposed)return;
     this.time+=dt;for(const rotor of this.windmills)rotor.rotation.z+=dt*.35;
     for(const c of this.crystals){c.mesh.rotation.y+=dt;c.mesh.position.y=c.baseY+Math.sin(this.time*2+c.item.distance)*.15;}
     for(let i=0;i<this.karts.length;i++){const k=this.karts[i],r=race.racers[i];if(!r)continue;const p=this.track.sample(r.distance),offset=r.offset??0;
@@ -214,4 +387,14 @@ export class World {
     this.wasMenu=menu;this.camera.updateProjectionMatrix();this.renderer.render(this.scene,this.camera);
   }
   spark(position,color,p,drift){if(this.particles.length>100)return;const m=mesh(new THREE.SphereGeometry(.16,5,4),new THREE.MeshBasicMaterial({color}),position.x-p.tx*1.3,position.y+.35,position.z-p.tz*1.3,this.scene);m.castShadow=false;this.particles.push({mesh:m,life:.35+Math.random()*.25,velocity:new THREE.Vector3((Math.random()-.5)*3-p.tx*3,Math.random()*2,-p.tz*3+(Math.random()-.5)*3)});}
+  dispose(){
+    if(this.disposed)return;this.disposed=true;
+    window.removeEventListener('resize',this.queueResize);window.removeEventListener('orientationchange',this.queueResize);
+    window.visualViewport?.removeEventListener('resize',this.queueResize);
+    document.removeEventListener('fullscreenchange',this.queueResize);document.removeEventListener('webkitfullscreenchange',this.queueResize);
+    this.canvasResize?.disconnect();if(this.resizeRequest)cancelAnimationFrame(this.resizeRequest);
+    releaseResources([this.scene,...Object.values(this.models??{})],Object.values(this.materials));
+    this.sun.shadow.dispose();this.renderer.renderLists.dispose();this.renderer.dispose();
+    this.scene.clear();this.models=null;this.karts.length=0;this.particles.length=0;this.windmills.length=0;
+  }
 }

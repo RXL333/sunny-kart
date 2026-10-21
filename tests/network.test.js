@@ -69,12 +69,12 @@ test('connect and concurrent create/join wait for welcome identity, then use the
   const socket = FakeWebSocket.instances[0];
   socket.open();
   // Re-enter connect through room actions during the open-to-welcome window.
-  const creating = network.create('fox', 'normal');
+  const creating = network.create('fox', 'normal', 'candy-hills');
   const joining = network.join('ABC234', 'rabbit');
   await new Promise(resolve => setImmediate(resolve));
   const resolvedBeforeWelcome = resolved;
   const actionsBeforeWelcome = socket.sent.filter(message => ['create', 'join'].includes(message.type));
-  socket.receive({ type: 'welcome', id: 'real-driver-7X9' });
+  socket.receive({ type: 'welcome', id: 'real-driver-7X9', trackIds: ['sunny-island','candy-hills'] });
   await Promise.all([connection, creating, joining]);
   assert.equal(resolvedBeforeWelcome, false, 'WebSocket open alone must not resolve connect');
   assert.equal(actionsBeforeWelcome.length, 0, 'Room actions must await welcome even when the socket is already open');
@@ -82,6 +82,7 @@ test('connect and concurrent create/join wait for welcome identity, then use the
   const create = socket.sent.find(message => message.type === 'create');
   const join = socket.sent.find(message => message.type === 'join');
   assert.equal(create.name, '阿橘·7X9'); assert.equal(create.character, 'fox'); assert.equal(create.difficulty, 'normal');
+  assert.equal(create.trackId, 'candy-hills');
   assert.equal(join.name, '薄荷·7X9'); assert.equal(join.room, 'ABC234'); assert.equal(join.character, 'rabbit');
   assert.equal(FakeWebSocket.instances.length, 1);
 });
@@ -108,4 +109,13 @@ test('leaving while create awaits welcome cancels that room action and still per
   assert.equal(actions[0].character, 'rabbit');
   assert.equal(actions[0].difficulty, 'easy');
   assert.equal(FakeWebSocket.instances.length, 1);
+});
+
+test('a frontend does not silently start a new course on a backend still running the older release', async t=>{
+  stubBrowser(t);const network=new Network();
+  const creating=network.create('fox','normal','starlight-canyon');
+  const socket=FakeWebSocket.instances[0];socket.open();socket.receive({type:'welcome',id:'old-backend'});
+  await assert.rejects(creating,/更新这条赛道/);
+  assert.equal(socket.sent.some(message=>message.type==='create'),false);
+  await network.create();assert.equal(socket.sent.find(message=>message.type==='create').trackId,'sunny-island');
 });

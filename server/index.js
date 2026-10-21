@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Race } from '../src/game/race.js';
-import { track } from '../src/game/track.js';
+import { track, createTrack, TRACK_CATALOG, DEFAULT_TRACK_ID } from '../src/game/track.js';
 
 const port = Number(process.env.PORT || 3001);
 const setting=(name,fallback,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(process.env[name]))?Number(process.env[name]):fallback));
@@ -15,6 +15,9 @@ const CREATE_COOLDOWN=setting('CREATE_ROOM_COOLDOWN_MS',1000,0,60000);
 const HEARTBEAT_INTERVAL=setting('HEARTBEAT_INTERVAL_MS',30000,1000,120000),LOBBY_IDLE=setting('LOBBY_IDLE_MS',900000,1000,86400000);
 const rooms = new Map();
 const clients = new Map();
+const trackCache = new Map([[DEFAULT_TRACK_ID, track]]);
+const trackIds = new Set(TRACK_CATALOG.map(course => course.id));
+function roomTrack(id) { if (!trackCache.has(id)) trackCache.set(id, createTrack(id)); return trackCache.get(id); }
 const allowedCharacters = new Set(['fox', 'rabbit', 'panda']);
 const allowedDifficulty = new Set(['easy', 'normal', 'hard']);
 const cleanName = value => String(value || '晴空车手').replace(/[\x00-\x1f<>]/g, '').trim().slice(0, 16) || '晴空车手';
@@ -27,7 +30,7 @@ const broadcast = (room, message) => { for (const client of room.members.values(
 const roomState = room => ({
   type: 'room', code: room.code, hostId: room.hostId, status: room.status,
   players: [...room.members.values()].map(c => ({ id: c.id, name: c.name, character: c.character, connected: true })),
-  difficulty: room.difficulty, laps: 3, maxPlayers: 8,
+  difficulty: room.difficulty, trackId: room.trackId, laps: 3, maxPlayers: 8,
 });
 
 function leaveRoom(client) {
@@ -58,6 +61,8 @@ function receive(client, message) {
   if (data.type === 'ping') { send(client, { type: 'pong', time: data.time, serverTime: Date.now() }); return; }
   if (data.type === 'leave') { leaveRoom(client); send(client, { type: 'left' }); return; }
   if (data.type === 'create') {
+    const trackId = data.trackId ?? DEFAULT_TRACK_ID;
+    if (!trackIds.has(trackId)) throw new Error('没有找到这条赛道，请重新选择');
     const now=performance.now();
     if(now-client.lastCreateAt<CREATE_COOLDOWN)throw new Error('创建房间过于频繁，请稍后重试');
     const existing=rooms.get(client.room);
@@ -65,7 +70,7 @@ function receive(client, message) {
     client.lastCreateAt=now;
     if (client.room) leaveRoom(client);
     client.name = cleanName(data.name); client.character = allowedCharacters.has(data.character) ? data.character : 'fox';
-    const room = { code: newCode(), hostId: client.id, members: new Map([[client.id, client]]), status: 'lobby', difficulty: allowedDifficulty.has(data.difficulty) ? data.difficulty : 'normal', race: null, tick: 0, lastActiveAt:now };
+    const room = { code: newCode(), hostId: client.id, members: new Map([[client.id, client]]), status: 'lobby', difficulty: allowedDifficulty.has(data.difficulty) ? data.difficulty : 'normal', trackId, race: null, tick: 0, lastActiveAt:now };
     rooms.set(room.code, room); client.room = room.code;
     send(client, roomState(room)); return;
   }
@@ -73,6 +78,7 @@ function receive(client, message) {
     const code = String(data.room || data.code || '').trim().toUpperCase();
     const room = rooms.get(code);
     if (!room) throw new Error('没有找到这个房间，请检查房间码');
+    if (room.trackId !== DEFAULT_TRACK_ID && data.protocolVersion !== 3) throw new Error('房间使用了新赛道，请刷新游戏后再加入');
     if (room.status === 'racing') throw new Error('比赛已经开始，等待下一场');
     if (room.members.size >= 8 && !room.members.has(client.id)) throw new Error('房间已满，最多 8 人');
     if (client.room !== room.code) leaveRoom(client);
@@ -87,7 +93,7 @@ function receive(client, message) {
     if (client.id !== room.hostId) throw new Error('只有房主可以开始比赛');
     if (room.status === 'racing') throw new Error('比赛已经开始');
     if (room.members.size < 2) throw new Error('邀请一位朋友加入后即可开始比赛');
-    room.race = new Race(track, {
+    room.race = new Race(roomTrack(room.trackId), {
       humanPlayers: [...room.members.values()].map(c => ({ id: c.id, name: c.name, character: c.character })),
       multiplayer: true, difficulty: room.difficulty, laps: 3,
     });
@@ -125,7 +131,7 @@ const server = http.createServer(async (req, res) => {
   catch { res.writeHead(400); res.end('Bad request'); return; }
   if (pathname === '/health') {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ ok: true, service: 'sunny-kart', tickRate: 60, snapshotRate: 20, rooms: rooms.size, clients: clients.size })); return;
+    res.end(JSON.stringify({ ok: true, service: 'sunny-kart', tickRate: 60, snapshotRate: 20, trackIds: [...trackIds], rooms: rooms.size, clients: clients.size })); return;
   }
   let filename = path.resolve(distRoot, `.${pathname}`);
   const withinRoot = filename === path.resolve(distRoot) || filename.startsWith(path.resolve(distRoot) + path.sep);
@@ -153,7 +159,7 @@ wss.on('connection', ws => {
   const client = { id: randomUUID(), ws, name: '晴空车手', character: 'fox', room: null, input: {}, seq: -1, inputAt: 0, messages: 0, rateAt: performance.now(), lastCreateAt:-Infinity, missedHeartbeats:0 };
   clients.set(client.id, client);
   ws.on('pong',()=>{client.missedHeartbeats=0;});
-  send(client, { type: 'welcome', id: client.id, serverTime: Date.now() });
+  send(client, { type: 'welcome', id: client.id, serverTime: Date.now(), trackIds: [...trackIds], protocolVersion: 3 });
   ws.on('message', bytes => {
     const now = performance.now();
     if (now - client.rateAt > 1000) { client.messages = 0; client.rateAt = now; }

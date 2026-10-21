@@ -55,6 +55,7 @@ test('two real WebSocket clients create/join/start, receive authoritative moveme
   a.send({ type: 'create', name: '橙子', character: 'fox' });
   const room = await a.wait(m => m.type === 'room');
   assert.equal(room.code.length, 6); assert.equal(room.hostId, a.id);
+  assert.equal(room.trackId, 'sunny-island', 'older clients without a selection use the original island');
   b.send({ type: 'join', room: room.code, name: '棉花', character: 'rabbit' });
   const joined = await b.wait(m => m.type === 'room' && m.players.length === 2);
   assert.equal(joined.players.length, 2);
@@ -88,4 +89,32 @@ test('two real WebSocket clients create/join/start, receive authoritative moveme
   assert.deepEqual(afterLeave.state.humanIds, [b.id]);
   b.send({ type: 'ping', time: 1234 });
   assert.equal((await b.wait(m => m.type === 'pong')).time, 1234);
+});
+
+test('every new course stays authoritative across room joins, start and snapshots', {timeout:16000}, async t => {
+  const port=await boot(t),a=await connect(port,t),b=await connect(port,t);
+  const health=await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+  assert.deepEqual(health.trackIds,['sunny-island','candy-hills','bay-loop','starlight-canyon']);
+  a.send({type:'create',trackId:'unknown-map'});
+  assert.match((await a.wait(m=>m.type==='error')).message,/赛道/);
+  for(const trackId of health.trackIds.slice(1)){
+    a.send({type:'create',trackId,character:'fox'});
+    const room=await a.wait(m=>m.type==='room'&&m.status==='lobby'&&m.trackId===trackId);
+    b.send({type:'join',room:room.code,character:'rabbit',trackId:'sunny-island'});
+    assert.match((await b.wait(m=>m.type==='error')).message,/刷新游戏/,'stale clients cannot silently render the wrong circuit');
+    b.send({type:'join',room:room.code,character:'rabbit',trackId:'sunny-island',protocolVersion:3});
+    const joined=await b.wait(m=>m.type==='room'&&m.code===room.code);
+    assert.equal(joined.trackId,trackId,'a guest cannot override the host course');
+    a.send({type:'start'});
+    const starts=await Promise.all([a.wait(m=>m.type==='started'),b.wait(m=>m.type==='started')]);
+    for(const message of starts)assert.equal(message.state.trackId,trackId);
+    const snapshot=await b.wait(m=>m.type==='snapshot'&&m.state.trackId===trackId);
+    assert.equal(snapshot.state.racers.length,8);
+    a.send({type:'leave'});await a.wait(m=>m.type==='left');
+    const transferred=await b.wait(m=>m.type==='room'&&m.hostId===b.id&&m.trackId===trackId);
+    assert.equal(transferred.trackId,trackId);
+    b.send({type:'leave'});await b.wait(m=>m.type==='left');
+    // Respect the production create cooldown instead of weakening it for this check.
+    await new Promise(resolve=>setTimeout(resolve,1050));
+  }
 });

@@ -1,7 +1,9 @@
 import './style.css';
 import './mobile.css';
 import './settings.css';
-import { track } from './game/track.js';
+import './courses.css';
+import './browser-gestures.css';
+import { track as defaultTrack, createTrack, TRACK_CATALOG, DEFAULT_TRACK_ID } from './game/track.js';
 import { Race } from './game/race.js';
 import { World } from './world.js';
 import { UI } from './ui.js';
@@ -10,8 +12,15 @@ import { AudioEngine } from './audio.js';
 import { PHYSICS } from './game/physics.js';
 import { drivingInput } from './input.js';
 import { GameSettings } from './settings.js';
+import { CoursePicker } from './course-picker.js';
+import { installBrowserGuards } from './browser-gestures.js';
 
-let race=new Race(track),world,settings,settingsResume=false,online=false,showedResults=false,rotationPaused=false,selection={character:'fox',difficulty:'normal'};
+const trackCache=new Map([[DEFAULT_TRACK_ID,defaultTrack]]);
+function getTrack(id){if(!trackCache.has(id))trackCache.set(id,createTrack(id));return trackCache.get(id);}
+let initialTrackId=DEFAULT_TRACK_ID;
+try{const remembered=localStorage.getItem('sunny-course-v1');if(TRACK_CATALOG.some(course=>course.id===remembered))initialTrackId=remembered;}catch{}
+let track=getTrack(initialTrackId);
+let race=new Race(track),world,settings,coursePicker,worldGeneration=0,worldLoading=false,worldReady=Promise.resolve(),settingsResume=false,online=false,showedResults=false,rotationPaused=false,selection={character:'fox',difficulty:'normal',trackId:track.id};
 const keys=new Set(),audio=new AudioEngine();
 let mute=false;try{mute=localStorage.getItem('sunny-muted')==='true';}catch{}
 audio.setMuted(mute);
@@ -19,7 +28,7 @@ const clearKeys=()=>{keys.clear();ui.clearTouch();};
 function pause(){if(!['racing','countdown'].includes(race.phase))return;if(online){ui.showToast('联机比赛持续进行，退出可返回大厅');return;}race.pause();ui.setPaused(true);clearKeys();}
 function resume(){race.resume();ui.setPaused(false);audio.unlock();}
 function mainMenu(){network.leave();online=false;rotationPaused=false;ui.setOnline(false);clearKeys();race=new Race(track,selection);showedResults=false;ui.showMenu();world?.setLineup?.(race.racers);}
-function start(options=selection){network.leave();online=false;rotationPaused=false;ui.setOnline(false);selection={...selection,...options};race=new Race(track,selection);race.start();showedResults=false;ui.setPaused(false);ui.enterRace?.();clearKeys();audio.unlock();world?.setLineup?.(race.racers);}
+function start(options=selection){if(worldLoading)return;network.leave();online=false;rotationPaused=false;ui.setOnline(false);selection={...selection,...options};race=new Race(track,selection);race.start();showedResults=false;ui.setPaused(false);ui.enterRace?.();clearKeys();audio.unlock();world?.setLineup?.(race.racers);}
 const ui=new UI({
   onStart:start,onPause:pause,onResume:resume,
   onOverview:active=>{if(world)world.overview=active;},
@@ -27,11 +36,14 @@ const ui=new UI({
   onCharacterChange:character=>{selection.character=character;if(race.phase==='menu'){race=new Race(track,selection);world?.setLineup?.(race.racers);}},
   onRestart:()=>{if(online){if(network.room?.hostId===network.id)network.start();else ui.showToast('等待房主开始下一场比赛');return;}start(selection);},onMenu:mainMenu,
   onMute:()=>{mute=!mute;audio.unlock();audio.setMuted(mute);ui.setMuted(mute);try{localStorage.setItem('sunny-muted',String(mute));}catch{}},
-  onCreateRoom:options=>{selection={...selection,...(options||{})};audio.unlock();network.create(selection.character,selection.difficulty).catch(e=>ui.showToast(e.message));},
+  onCreateRoom:options=>{selection={...selection,...(options||{})};audio.unlock();network.create(selection.character,selection.difficulty,track.id).catch(e=>ui.showToast(e.message));},
   onJoinRoom:(code,options)=>{selection={...selection,...(options||{})};audio.unlock();network.join(code,selection.character).catch(e=>ui.showToast(e.message));},
   onLeaveRoom:mainMenu,onStartRoom:()=>{audio.unlock();network.start();},
 });
+coursePicker=new CoursePicker(document.querySelector('#app'),{onSelect:id=>selectCourse(id,true)});
+coursePicker.setSelected(track.id);coursePicker.setBusy(true);ui.setCourse(track);
 ui.setMuted(mute);
+installBrowserGuards();
 function applySettings(values){ui.autoThrottleChosen=true;ui.setAutoThrottle(values.autoThrottle,false);ui.setControlLayout(values.controlLayout);ui.clearTouch();audio.setVolume(values.soundVolume);world?.setGraphicsQuality(values.graphics);}
 settings=new GameSettings(document.querySelector('#app'),{
   defaults:{autoThrottle:ui.mobile.hardwareTouch},onChange:applySettings,
@@ -41,8 +53,8 @@ settings=new GameSettings(document.querySelector('#app'),{
 applySettings(settings.values);
 const network=new Network({
   status:state=>ui.setNetwork(state),
-  room:room=>{if(room.status==='lobby')ui.showLobby(room);},
-  started:(state,id)=>{online=true;showedResults=false;race=new Race(track,{...selection,multiplayer:true,localPlayerId:id});race.applySnapshot(state,id);selection={character:race.player.character,difficulty:network.room?.difficulty??selection.difficulty};clearKeys();ui.setPaused(false);ui.enterRace?.();ui.setOnline(true);world?.setLineup?.(race.racers);},
+  room:room=>{if(room.status==='lobby'){selectCourse(room.trackId||DEFAULT_TRACK_ID,false);ui.showLobby(room);}},
+  started:(state,id)=>{selectCourse(state.trackId||network.room?.trackId||DEFAULT_TRACK_ID,false);online=true;showedResults=false;race=new Race(track,{...selection,multiplayer:true,localPlayerId:id});race.applySnapshot(state,id);selection={character:race.player.character,difficulty:network.room?.difficulty??selection.difficulty,trackId:track.id};clearKeys();ui.setPaused(false);ui.enterRace?.();ui.setOnline(true);world?.setLineup?.(race.racers);},
   snapshot:state=>{if(!online)return;race.applySnapshot(state,network.id);
     // Prediction starts from the authoritative state and accounts for roughly one-way latency.
     if(race.phase==='racing'&&!race.player.finished)predictPlayer(Math.min(.12,network.ping/2000),readInput());
@@ -50,6 +62,24 @@ const network=new Network({
   error:message=>ui.showToast(message),
   disconnected:()=>{mainMenu();ui.showToast('联机连接已断开，请重新创建或加入房间');},
 });
+
+function selectCourse(id,persist=false){
+  if(!TRACK_CATALOG.some(course=>course.id===id)){ui.showToast('这条赛道暂不可用，请刷新游戏后重试');return;}
+  if(persist){try{localStorage.setItem('sunny-course-v1',id);}catch{} }
+  if(track.id===id)return;
+  track=getTrack(id);selection.trackId=id;race=new Race(track,selection);showedResults=false;clearKeys();ui.setCourse(track);coursePicker.setSelected(id);
+  worldReady=loadWorld().catch(error=>{console.error(error);ui.showToast('赛道载入失败，请刷新后重试');});
+}
+
+async function loadWorld(){
+  const generation=++worldGeneration;worldLoading=true;coursePicker.setBusy(true);ui.setLoading(.1);
+  try{
+    world?.dispose();const next=new World(document.querySelector('#game'),track);world=next;
+    next.setGraphicsQuality(settings.values.graphics);ui.setLoading(.55);
+    await next.createKarts();if(generation!==worldGeneration)return;
+    next.setLineup(race.racers);ui.setLoading(1);ui.setCourse(track);
+  }finally{if(generation===worldGeneration){worldLoading=false;coursePicker.setBusy(false);}}
+}
 
 function predictPlayer(duration,input){
   const eventCount=race.events.length;
@@ -61,7 +91,7 @@ function predictPlayer(duration,input){
 function readInput(){return drivingInput(keys,ui.touchState,ui.autoThrottle,{sensitivity:settings.values.steeringSensitivity,blocked:ui.mobile.blocked||settings.isOpen});}
 window.addEventListener('keydown',event=>{
   if(settings.isOpen||ui.mobile.blocked)return;
-  if(event.target instanceof HTMLInputElement)return;
+  if(event.target instanceof HTMLInputElement||event.target instanceof HTMLSelectElement||event.target?.closest?.('.courses-overlay'))return;
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Tab'].includes(event.code)&&race.phase!=='menu')event.preventDefault();
   if(!event.repeat&&event.code==='Escape'){if(race.phase==='paused')resume();else if(['racing','countdown'].includes(race.phase))pause();}
   if(!event.repeat&&event.code==='KeyR'&&!online&&race.phase!=='menu')start(selection);
@@ -77,11 +107,11 @@ function minimap(){const c=ui.minimap;if(!c)return;const ctx=c.getContext('2d'),
   ctx.beginPath();track.points.forEach((p,i)=>i?ctx.lineTo(sx(p.x),sz(p.z)):ctx.moveTo(sx(p.x),sz(p.z)));ctx.closePath();ctx.strokeStyle='rgba(18,60,72,.13)';ctx.lineWidth=13;ctx.stroke();ctx.strokeStyle='#fff8de';ctx.lineWidth=7;ctx.stroke();
   for(const r of [...race.racers].reverse()){const p=track.sample(r.distance),self=r.id===race.player.id;ctx.beginPath();ctx.arc(sx(p.x),sz(p.z),self?5:3,0,Math.PI*2);ctx.fillStyle=self?'#f4a746':r.color??'#53a99e';ctx.fill();if(self){ctx.strokeStyle='#153e49';ctx.lineWidth=2;ctx.stroke();}}
 }
-function finish(){if(showedResults)return;showedResults=true;const key=`sunny-best-v2-${Math.round(track.length)}-${selection.character}-${selection.difficulty}`;let best=null;try{best=Number(localStorage.getItem(key))||null;if(race.player.finishTime&&(!best||race.player.finishTime<best)){best=race.player.finishTime;localStorage.setItem(key,String(best));}}catch{}
+function finish(){if(showedResults)return;showedResults=true;const key=track.id===DEFAULT_TRACK_ID?`sunny-best-v2-${Math.round(track.length)}-${selection.character}-${selection.difficulty}`:`sunny-best-v3-${track.id}-${selection.character}-${selection.difficulty}`;let best=null;try{best=Number(localStorage.getItem(key))||null;if(race.player.finishTime&&(!best||race.player.finishTime<best)){best=race.player.finishTime;localStorage.setItem(key,String(best));}}catch{}
   ui.showResults(race.results,best);audio.event({type:'results'});
 }
 async function boot(){try{
-  ui.setLoading(.1);world=new World(document.querySelector('#game'),track);world.setGraphicsQuality(settings.values.graphics);ui.setLoading(.55);await world.createKarts();await world.setLineup?.(race.racers);ui.setLoading(1);ui.setCourse(track);
+  worldReady=loadWorld();await worldReady;
   let last=performance.now(),accumulator=0;
   function frame(now){const dt=Math.min((now-last)/1000,.05);last=now;
     if(!online&&ui.mobile.blocked&&!settings.isOpen&&['countdown','racing'].includes(race.phase)){rotationPaused=true;race.pause();ui.setPaused(true);clearKeys();}

@@ -38,6 +38,11 @@
 .settings-reset { background: transparent; min-height: 44px; padding: 9px 12px; color: #627c72; font-size: 11px; border: 1px solid #cbd8c4; border-radius: 10px; }
 #app .settings-dialog .settings-done { width: auto; min-width: 190px; min-height: 46px; font-size: 12px; gap: 22px; }
 #app .settings-dialog .settings-close { width: 44px; height: 44px; right: 14px; top: 13px; font-size: 27px; }
+.settings-custom-layout { display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:48px;padding:10px 12px;border:1px solid #80b3a6;border-radius:11px;background:#edf6dc;font-size:12px;font-weight:800;text-align:left; }
+.settings-custom-layout > span:last-child { color:#477b73;font-size:10px;white-space:nowrap; }
+.settings-layout-summary { font-size:10px;color:#6c8387;line-height:1.7;margin:7px 0 18px; }
+.settings-save-status { min-height:16px;margin:2px 0 13px;color:#2d796a;font-size:11px;line-height:1.6; }
+.settings-field input:disabled { opacity:.45;cursor:default; }
 .settings-field :focus-visible, .settings-reset:focus-visible { outline: 3px solid #ee965c; outline-offset: 2px; }
 @media (max-width: 580px) and (orientation: portrait) {
   #app .settings-dialog { padding: 22px 20px 20px; border-radius: 22px; }
@@ -48,6 +53,41 @@
   .settings-reset { padding: 9px; font-size: 10px; }
   #app .settings-dialog .settings-done { min-width: 0; flex: 1; padding: 0 12px; font-size: 11px; gap: 8px; }
   .settings-field select { font-size: 16px; }
+}
+
+/* Saved centres are applied to the original gameplay controls, preserving pointer ownership. */
+.control-safe-probe { position:absolute;inset:0;visibility:hidden;pointer-events:none;padding:var(--safe-top,10px) var(--safe-right,16px) var(--safe-bottom,16px) var(--safe-left,16px); }
+#app[data-custom-controls="true"] .touch-controls .touch-steering,
+#app[data-custom-controls="true"] .touch-controls .touch-driving { display:contents!important;position:static!important; }
+#app[data-custom-controls="true"] .touch-controls [data-touch] { position:absolute;right:auto!important;bottom:auto!important;width:var(--custom-control-size)!important;height:var(--custom-control-size)!important;transform:translate(-50%,-50%)!important;display:grid;place-items:center; }
+#app.editing-controls .touch-controls { visibility:hidden; }
+#app .control-layout-editor { position:absolute;inset:0;z-index:95;pointer-events:auto;touch-action:none;user-select:none;background:linear-gradient(180deg,#173f4ed9 0,#173f4e65 24%,#173f4e20 72%,#173f4e75); }
+.control-editor-bar { position:absolute;left:var(--safe-left,16px);right:var(--safe-right,16px);top:var(--safe-top,10px);display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:62px;padding:10px 14px;background:#fffaf0f5;border:1px solid #ffffffbb;border-radius:14px;box-shadow:0 4px 20px #102f3922; }
+#app .control-editor-bar h2 { margin:0 0 5px;font-size:17px;line-height:1.3; }
+.control-editor-description { margin:0;font-size:10px;color:#627c72;line-height:1.5; }
+.control-editor-actions { display:flex;gap:7px;flex-shrink:0; }
+#app .control-editor-actions button { min-height:44px;padding:8px 13px;border:1px solid #b1c3ad;border-radius:9px;background:#fffaf0;font-size:12px;font-weight:700;white-space:nowrap; }
+#app .control-editor-actions .control-editor-save { background:#eafa75;border-color:#203c46; }
+.control-editor-status { position:absolute;left:50%;top:91px;transform:translateX(-50%);margin:0;max-width:calc(100% - 32px);padding:6px 12px;border-radius:12px;background:#fffaf0de;color:#365f5c;font-size:10px;line-height:1.5;text-align:center;pointer-events:none; }
+.control-editor-road { position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:7px;color:#fffaf0b0;text-shadow:0 2px 6px #173f4e;font-size:17px;pointer-events:none; }
+.control-editor-road small { font-size:10px;white-space:nowrap; }
+#app .control-editor-button { position:absolute;width:var(--editor-control-size,64px);height:var(--editor-control-size,64px);transform:translate(-50%,-50%)!important;border:2px dashed #fffaf0;border-radius:17px;background:#fffaf0d9;box-shadow:0 4px 0 #173f4e80;touch-action:none;font-size:11px;font-weight:800;cursor:grab;transition:background .15s,box-shadow .15s; }
+#app .control-editor-throttle { background:#eafa75e6; }
+#app .control-editor-nitro { background:#ffe3a6e6; }
+#app .control-editor-button.dragging { cursor:grabbing;background:#fffaf0;box-shadow:0 0 0 5px #eafa7540,0 5px 18px #173f4e55;border-style:solid; }
+@media (max-width:600px) and (orientation:portrait) {
+  .control-editor-bar { flex-direction:column;gap:8px;padding:10px;align-items:stretch;min-height:110px; }
+  #app .control-editor-bar h2 { font-size:16px; }
+  .control-editor-actions { justify-content:space-between; }
+  #app .control-editor-actions button { flex:1;padding:8px 10px;font-size:11px; }
+  .control-editor-status { top:137px; }
+}
+@media (orientation:landscape) and (max-height:400px) {
+  .control-editor-bar { min-height:58px;padding:7px 10px;gap:10px; }
+  #app .control-editor-bar h2 { font-size:14px; }
+  .control-editor-description { font-size:9px; }
+  #app .control-editor-actions button { padding:7px 10px;font-size:11px; }
+  .control-editor-status { top:78px;font-size:9px;padding:4px 9px; }
 }
 @media (orientation: landscape) and (max-height: 560px) {
   #app .settings-dialog { width: min(760px, 100%); max-width:760px; padding:17px 23px 19px; }

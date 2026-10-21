@@ -1,3 +1,5 @@
+import { ControlLayoutEditor } from './control-layout.js';
+
 export const SETTINGS_STORAGE_KEY = 'sunny-settings-v1';
 export const DEFAULT_SETTINGS = Object.freeze({
   controlLayout: 'standard',
@@ -65,7 +67,9 @@ export class GameSettings {
         <div class="settings-grid">
           <section class="settings-section" aria-labelledby="settings-controls-title">
             <h3 id="settings-controls-title">驾驶与按键</h3>
-            <label class="settings-field"><span>触控布局</span><select data-setting="controlLayout" aria-label="触控布局"><option value="standard">标准 · 左手转向</option><option value="left-handed">左手动作 · 右手转向</option></select></label>
+            <label class="settings-field"><span>触控布局</span><select data-setting="controlLayout" aria-label="触控布局"><option value="standard">标准 · 左手转向</option><option value="left-handed">左手动作 · 右手转向</option></select><small>切换预设会恢复按键位置；大小和灵敏度保留。</small></label>
+            <button type="button" class="settings-custom-layout"><span>自定义按键位置</span><span aria-hidden="true">拖动排列 ↗</span></button>
+            <p class="settings-layout-summary">横屏与竖屏的按键位置分别保存。</p>
             <label class="settings-field settings-toggle"><span>自动油门<small>开启后专心转向，仍可按住刹车减速。</small></span><input data-setting="autoThrottle" type="checkbox" aria-label="设置自动油门" /></label>
             ${this.slider('steeringSensitivity', '转向灵敏度', .35, 1, .05, '降低灵敏度，转弯更柔和。')}
             ${this.slider('buttonSize', '按键大小', 56, 84, 1)}
@@ -80,16 +84,22 @@ export class GameSettings {
             <div class="settings-tip"><strong>双手都舒服，弯道才顺手。</strong><p>左侧方向键可以按住或滑动切换；漂移转弯时按住，松开后小喷。⚡ 氮气可以与转向同时按住。</p></div>
           </section>
         </div>
+        <p class="settings-save-status" role="status"></p>
         <div class="settings-footer"><button type="button" class="settings-reset">恢复默认设置</button><button type="button" class="primary-button settings-done">完成，继续出发 <span aria-hidden="true">→</span></button></div>
       </div>`;
     root.append(overlay);this.overlay = overlay;
     this.closeButton = overlay.querySelector('.settings-close');
     this.controls = [...overlay.querySelectorAll('[data-setting]')];
     this.openButton = root.querySelector('.settings-button');
+    this.layoutEditor = new ControlLayoutEditor(root, { storage,
+      onStatus: message => { this.overlay.querySelector('.settings-save-status').textContent = message;this.render(); },
+      onReturn: () => { if (this.isOpen) { this.overlay.hidden = false;this.overlay.querySelector('.settings-custom-layout').focus(); } },
+    });
+    overlay.querySelector('.settings-custom-layout').addEventListener('click', () => { this.overlay.hidden = true;this.layoutEditor.open(); });
     this.openButton?.addEventListener('click', () => this.open());
     this.closeButton.addEventListener('click', () => this.close());
     overlay.querySelector('.settings-done').addEventListener('click', () => this.close());
-    overlay.querySelector('.settings-reset').addEventListener('click', () => this.setValues(this.defaults));
+    overlay.querySelector('.settings-reset').addEventListener('click', () => { this.layoutEditor.reset();this.setValues(this.defaults); });
     for (const control of this.controls) {
       control.addEventListener(control.type === 'range' ? 'input' : 'change', () => {
         const key = control.dataset.setting;
@@ -116,8 +126,10 @@ export class GameSettings {
   }
 
   setValues(patch, { notify = true, persist = true } = {}) {
+    const previousLayout = this.values.controlLayout;
     this.values = Object.freeze(validateSettings({ ...this.values, ...record(patch) }, this.defaults));
-    if (persist) saveSettings(this.storage, this.values, this.defaults);
+    if (previousLayout !== this.values.controlLayout) this.layoutEditor.reset();
+    if (persist && !saveSettings(this.storage, this.values, this.defaults)) this.overlay.querySelector('.settings-save-status').textContent = '设置已应用，但浏览器未能保存；刷新后可能还原。';
     this.apply();this.render();
     if (notify) this.onChange?.({ ...this.values });
     return this.values;
@@ -128,6 +140,7 @@ export class GameSettings {
     this.root.style.setProperty('--control-size', `${this.values.buttonSize}px`);
     this.root.style.setProperty('--control-opacity', String(this.values.buttonOpacity));
     this.root.style.setProperty('--control-bottom', `${this.values.controlBottom}px`);
+    this.layoutEditor.apply(this.values);
   }
 
   render() {
@@ -142,17 +155,21 @@ export class GameSettings {
     }
     const side = this.values.controlLayout === 'left-handed' ? '右侧' : '左侧';
     this.overlay.querySelector('.settings-tip p').textContent = `${side}方向键可以按住或滑动切换；漂移转弯时按住，松开后小喷。⚡ 氮气可以与转向同时按住。`;
+    const customized = this.layoutEditor.hasCustom();
+    this.overlay.querySelector('.settings-layout-summary').textContent = this.layoutEditor.adaptedDefaults ? '当前屏幕较小，已临时使用预设避免按键重叠；原布局仍保留，可重新调整。' : customized ? '已保存自定义位置 · 横竖屏分别记录；切换预设可恢复。' : '当前使用预设位置 · 横屏与竖屏可以分别自定义。';
+    this.overlay.querySelector('[data-setting="controlBottom"]').disabled = this.root.dataset.customControls === 'true';
   }
 
   open() {
     if (this.isOpen) return;
     this.onOpen?.();this.isOpen = true;this.overlay.hidden = false;
+    this.apply();this.render();
     this.previousFocus = this.root.ownerDocument.activeElement;this.closeButton.focus();
   }
 
   close() {
     if (!this.isOpen) return;
-    this.isOpen = false;this.overlay.hidden = true;this.onClose?.();
+    this.isOpen = false;this.layoutEditor.cancel();this.overlay.hidden = true;this.onClose?.();
     const target = this.openButton || this.previousFocus;
     if (target?.isConnected) target.focus();
   }

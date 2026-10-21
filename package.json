@@ -1,6 +1,6 @@
 {
   "name": "sunny-kart",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "happy-dom": "21.0.4",
     "vite": "^7.1.9"
   }
 }

@@ -1,0 +1,8 @@
+#game,#app{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+#game,.touch-controls,[data-touch],.control-layout-editor,[data-layout-action]{touch-action:none;-webkit-user-drag:none}
+#app button,#app a{touch-action:manipulation;-webkit-user-drag:none}
+#app .touch-controls button,#app [data-layout-action]{touch-action:none}
+#app input,#app textarea,#app select,#app [contenteditable="true"],#app [data-allow-selection]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+#app .room-code{-webkit-user-select:all;user-select:all;-webkit-touch-callout:default}
+#app svg,#app img{-webkit-user-drag:none}
+#app .overlay,#app .dialog{overscroll-behavior:contain}

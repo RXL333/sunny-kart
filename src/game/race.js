@@ -206,6 +206,7 @@ export class Race {
   }
   snapshot() {
     return {
+      trackId: this.track.id,
       phase: this.phase, countdown: this.countdown, elapsed: this.elapsed, laps: this.laps,
       finishTime: this.finishTime, results: this.results, playerId: this.player.id,
       humanIds: [...this.humanIds], racers: this.racers.map(r => ({ ...r, nextPad: undefined })),

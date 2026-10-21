@@ -45,7 +45,7 @@ export class Network {
     });
   }
   message(message) {
-    if(message.type==='welcome')this.id=message.id;
+    if(message.type==='welcome'){this.id=message.id;this.serverTracks=Array.isArray(message.trackIds)?message.trackIds:['sunny-island'];}
     if(message.type==='room'){this.room=message;this.callbacks.room?.({...message,selfId:this.id});}
     if(message.type==='started')this.callbacks.started?.(message.state,this.id);
     if(message.type==='snapshot')this.callbacks.snapshot?.(message.state,message.tick);
@@ -54,13 +54,14 @@ export class Network {
   }
   send(message){if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify(message));}
   driverName(character){return `${{fox:'阿橘',rabbit:'薄荷',panda:'波波'}[character]??'车手'}·${this.id.slice(-3)}`;}
-  async create(character='fox',difficulty='normal'){
+  async create(character='fox',difficulty='normal',trackId='sunny-island'){
     const generation=this.roomGeneration;await this.connect();if(generation!==this.roomGeneration)return;
-    this.send({type:'create',name:this.driverName(character),character,difficulty});
+    if(!this.serverTracks?.includes(trackId))throw new Error('联机服务正在更新这条赛道，请稍后再试；现在可以先玩单人模式');
+    this.send({type:'create',name:this.driverName(character),character,difficulty,trackId});
   }
   async join(room,character='fox'){
     const generation=this.roomGeneration;await this.connect();if(generation!==this.roomGeneration)return;
-    this.send({type:'join',room,name:this.driverName(character),character});
+    this.send({type:'join',room,name:this.driverName(character),character,protocolVersion:3});
   }
   start(){this.send({type:'start'});}
   leave(){this.roomGeneration++;this.send({type:'leave'});this.room=null;}

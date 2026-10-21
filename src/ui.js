@@ -90,7 +90,7 @@ export class UI {
       this.difficulty = button.dataset.difficulty;
       this.all('[data-difficulty]').forEach(b => { const selected = b === button; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', selected); });
     }));
-    this.el('.start-button').addEventListener('click', () => { this.beginRace(); this.callbacks.onStart?.({ character: this.character, difficulty: this.difficulty }); });
+    this.el('.start-button').addEventListener('click', () => { this.callbacks.onStart?.({ character: this.character, difficulty: this.difficulty }); });
     this.el('.pause-button').addEventListener('click', () => this.callbacks.onPause?.());
     this.el('.auto-throttle-button').addEventListener('click', () => this.setAutoThrottle(!this.autoThrottle));
     this.el('.resume-button').addEventListener('click', () => { this.setPaused(false); this.callbacks.onResume?.(); });
@@ -188,7 +188,10 @@ export class UI {
 
   setLoading(progress) {
     const p = Math.min(1, Math.max(0, Number(progress) || 0));
+    this.loading = p < 1;
     this.el('.start-button').disabled = p < 1;
+    this.el('.friend-button').disabled = p < 1;
+    if(this.room)this.el('.start-room-button').disabled=p<1||(this.room.players?.length||0)<2;
     this.el('.loading-label').textContent = p >= 1 ? '3 圈竞速 · 8 位车手 · 一路好心情' : `正在准备晴空海岸… ${Math.round(p * 100)}%`;
     this.el('.ready-dot').classList.toggle('loading', p < 1);
   }
@@ -222,7 +225,7 @@ export class UI {
     this.el('.result-time').textContent = player.finished === false ? '未完赛' : timeText(time);
     this.el('.result-best').textContent = best ? timeText(typeof best === 'object' ? best.time : best) : '--:--.--';
     const rank = player.position || rows.indexOf(player) + 1;
-    this.el('.result-summary').textContent = player.finished === false ? `比赛结束 · 当前第 ${rank} 名` : `第 ${rank} 名完成晴风海岸 · 每一圈都值得喝彩`;
+    this.el('.result-summary').textContent = player.finished === false ? `比赛结束 · 当前第 ${rank} 名` : `第 ${rank} 名完成${this.track?.name || '晴空大环岛'} · 每一圈都值得喝彩`;
     this.el('.result-list').innerHTML = rows.map((r, i) => `<div class="result-row ${r === player ? 'is-you' : ''}"><span class="result-rank">${r.position || i + 1}</span><span class="result-name">${escapeHTML(r.name || r.characterName || chars[r.character]?.name || `车手 ${i + 1}`)}${r === player ? '<small>你</small>' : ''}</span><span class="result-row-time">${(r.finishTime ?? r.time) != null ? timeText(r.finishTime ?? r.time) : '未完赛'}</span></div>`).join('');
   }
 
@@ -232,6 +235,7 @@ export class UI {
     this.el('.room-content').hidden = true;
     this.el('#room-code-input').value = '';
     this.el('.lobby-status').textContent = '创建房间，或输入朋友的房间号';
+    this.el('.lobby-description').textContent = `本次目的地：${this.track?.name || '晴空大环岛'}。分享房间号，邀请朋友一起出发。`;
   }
 
   showLobby(data = {}) {
@@ -244,11 +248,12 @@ export class UI {
     this.el('.room-entry').hidden = true;
     this.el('.room-content').hidden = false;
     this.el('.room-code').textContent = data.code || '------';
+    this.el('.lobby-description').textContent = `比赛赛道：${this.track?.name || '晴空大环岛'} · 3 圈竞速`;
     const players = data.players || [];
     this.el('.lobby-players').innerHTML = players.map((p, i) => `<div class="lobby-player"><span class="lobby-avatar">${icons[p.character] || foxIcon}</span><span><strong>${escapeHTML(p.name || chars[p.character]?.name || `车手 ${i + 1}`)}</strong><small>${p.id === data.hostId ? '房主' : '已上车'}${p.id === data.selfId ? ' · 你' : ''}</small></span><span class="player-ready">●</span></div>`).join('') + Array.from({ length: Math.max(0, 4 - players.length) }, (_, i) => `<div class="lobby-player empty"><span class="empty-avatar">+</span><span>等一位好朋友<small>没有玩家时由 AI 补齐</small></span></div>`).join('');
     const host = data.hostId === data.selfId;
     this.el('.start-room-button').hidden = !host;
-    this.el('.start-room-button').disabled = players.length < 2;
+    this.el('.start-room-button').disabled = players.length < 2 || Boolean(this.loading);
     this.el('.start-room-button span').textContent = players.length < 2 ? '等一位好友上车' : '全员上车，出发！';
     this.el('.waiting-host').hidden = host;
     this.el('.lobby-status').textContent = data.status === 'lobby' || !data.status ? '房间已就绪，分享房间号邀请好友' : data.status;
@@ -257,9 +262,13 @@ export class UI {
   setCourse(track) {
     this.track = track;
     this.el('.course-stamp strong').textContent = track.name;
-    this.el('.edition').textContent = 'VOL. 02';
+    this.el('.course-stamp > div > small').textContent = track.english || 'SUNSHINE ISLAND';
+    this.el('.course-number').textContent = String(['sunny-island','candy-hills','bay-loop','starlight-canyon'].indexOf(track.id)+1).padStart(2,'0');
+    this.el('.course-weather').innerHTML = track.id === 'starlight-canyon' ? '✦<small>星夜</small>' : '☀<small>晴朗</small>';
+    this.currentZone = null;
+    this.el('.edition').textContent = 'VOL. 03';
     this.el('.ready-line .loading-label').textContent = `${(track.length / 1000).toFixed(2)} km / 圈 · ${track.zones?.length || 1} 大区域 · 8 位车手`;
-    const zone = document.createElement('span');zone.className='course-zone';this.el('.lap-panel').append(zone);
+    if (!this.el('.course-zone')) { const zone = document.createElement('span');zone.className='course-zone';this.el('.lap-panel').append(zone); }
     this.updateCourse(0);
   }
   setOverview(active) {
