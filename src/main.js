@@ -3,6 +3,7 @@ import './mobile.css';
 import './settings.css';
 import './courses.css';
 import './browser-gestures.css';
+import './keyboard.css';
 import { track as defaultTrack, createTrack, TRACK_CATALOG, DEFAULT_TRACK_ID } from './game/track.js';
 import { Race } from './game/race.js';
 import { World } from './world.js';
@@ -14,6 +15,7 @@ import { drivingInput } from './input.js';
 import { GameSettings } from './settings.js';
 import { CoursePicker } from './course-picker.js';
 import { installBrowserGuards } from './browser-gestures.js';
+import { actionForKey } from './keyboard-bindings.js';
 
 const trackCache=new Map([[DEFAULT_TRACK_ID,defaultTrack]]);
 function getTrack(id){if(!trackCache.has(id))trackCache.set(id,createTrack(id));return trackCache.get(id);}
@@ -31,6 +33,7 @@ function mainMenu(){network.leave();online=false;rotationPaused=false;ui.setOnli
 function start(options=selection){if(worldLoading)return;network.leave();online=false;rotationPaused=false;ui.setOnline(false);selection={...selection,...options};race=new Race(track,selection);race.start();showedResults=false;ui.setPaused(false);ui.enterRace?.();clearKeys();audio.unlock();world?.setLineup?.(race.racers);}
 const ui=new UI({
   onStart:start,onPause:pause,onResume:resume,
+  onInputModeChange:()=>keys.clear(),
   onOverview:active=>{if(world)world.overview=active;},
   onAutoThrottleChange:active=>settings?.setValues({autoThrottle:active},{notify:false}),
   onCharacterChange:character=>{selection.character=character;if(race.phase==='menu'){race=new Race(track,selection);world?.setLineup?.(race.racers);}},
@@ -46,10 +49,14 @@ ui.setMuted(mute);
 installBrowserGuards();
 function applySettings(values){ui.autoThrottleChosen=true;ui.setAutoThrottle(values.autoThrottle,false);ui.setControlLayout(values.controlLayout);ui.clearTouch();audio.setVolume(values.soundVolume);world?.setGraphicsQuality(values.graphics);}
 settings=new GameSettings(document.querySelector('#app'),{
-  defaults:{autoThrottle:ui.mobile.hardwareTouch},onChange:applySettings,
+  defaults:{autoThrottle:ui.mobile.inputMode==='touch'},onChange:applySettings,
   onOpen:()=>{ui.settingsOpen=true;clearKeys();settingsResume=!online&&['racing','countdown'].includes(race.phase);if(settingsResume){race.pause();ui.setPaused(true);}},
   onClose:()=>{ui.settingsOpen=false;clearKeys();if(settingsResume&&race.phase==='paused'){if(ui.mobile.blocked)rotationPaused=true;else resume();}settingsResume=false;},
+  onBindingsChange:bindings=>{clearKeys();ui.setKeyBindings(bindings);},
 });
+ui.setKeyBindings(settings.bindings);
+settings.setInputMode(ui.root.dataset.inputMode);
+ui.root.addEventListener('inputmodechange',()=>{clearKeys();settings.setInputMode(ui.root.dataset.inputMode);});
 applySettings(settings.values);
 const network=new Network({
   status:state=>ui.setNetwork(state),
@@ -88,14 +95,16 @@ function predictPlayer(duration,input){
   race.events.length=eventCount;
 }
 
-function readInput(){return drivingInput(keys,ui.touchState,ui.autoThrottle,{sensitivity:settings.values.steeringSensitivity,blocked:ui.mobile.blocked||settings.isOpen});}
+function readInput(){return drivingInput(keys,ui.touchState,ui.autoThrottle,{bindings:settings.bindings,sensitivity:settings.values.steeringSensitivity,blocked:ui.mobile.blocked||settings.isOpen});}
 window.addEventListener('keydown',event=>{
   if(settings.isOpen||ui.mobile.blocked)return;
-  if(event.target instanceof HTMLInputElement||event.target instanceof HTMLSelectElement||event.target?.closest?.('.courses-overlay'))return;
-  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Tab'].includes(event.code)&&race.phase!=='menu')event.preventDefault();
-  if(!event.repeat&&event.code==='Escape'){if(race.phase==='paused')resume();else if(['racing','countdown'].includes(race.phase))pause();}
-  if(!event.repeat&&event.code==='KeyR'&&!online&&race.phase!=='menu')start(selection);
-  if(!event.repeat&&event.code==='KeyQ')ui.setAutoThrottle?.(!ui.autoThrottle);
+  if(event.isComposing||event.key==='Process'||event.keyCode===229||event.ctrlKey||event.metaKey||event.altKey){keys.clear();return;}
+  if(event.target?.closest?.('input,textarea,select,[contenteditable="true"],.courses-overlay,.help-overlay,.lobby-overlay'))return;
+  const action=actionForKey(settings.bindings,event.code);if(!action)return;
+  if(race.phase!=='menu')event.preventDefault();
+  if(!event.repeat&&action==='pause'){if(race.phase==='paused')resume();else if(['racing','countdown'].includes(race.phase))pause();}
+  if(!event.repeat&&action==='restart'&&!online&&race.phase!=='menu')start(selection);
+  if(!event.repeat&&action==='autoThrottle')ui.setAutoThrottle?.(!ui.autoThrottle);
   keys.add(event.code);
 });
 window.addEventListener('keyup',e=>keys.delete(e.code));

@@ -1,0 +1,63 @@
+/* Input hints follow the active input device, independent of viewport size. */
+#app[data-input-mode="touch"] .keyboard-guide,
+#app[data-input-mode="touch"] .race-hint,
+#app[data-input-mode="touch"] .keyboard-help-list,
+#app[data-input-mode="touch"] .keyboard-help-footnote { display:none; }
+#app[data-input-mode="keyboard"] .touch-controls,
+#app[data-input-mode="keyboard"] .mobile-hint,
+#app[data-input-mode="keyboard"] .touch-hint,
+#app[data-input-mode="keyboard"] .touch-help-list,
+#app[data-input-mode="keyboard"] .touch-help-footnote { display:none!important; }
+#app[data-input-mode="keyboard"] .keyboard-guide,
+#app[data-input-mode="keyboard"] .race-hint {
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  font-size:11px;letter-spacing:0;line-height:1.5;color:#294f56;
+}
+#app[data-input-mode="keyboard"] .keyboard-guide { flex-wrap:wrap;justify-content:flex-start;row-gap:8px; }
+#app[data-input-mode="keyboard"] .menu-footer { gap:16px; }
+#app[data-input-mode="keyboard"] .menu-footer .footer-note { display:none; }
+#app[data-input-mode="keyboard"] .race-hint {
+  left:50%;bottom:max(12px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  width:max-content;max-width:calc(100% - 32px);padding:8px 12px;
+  background:#fffaf0ed;border:1px solid #fff8;border-radius:10px;
+  box-shadow:0 3px 12px #173f4e15;flex-wrap:wrap;row-gap:7px;
+}
+#app[data-input-mode="keyboard"] .key-hint { display:inline-flex;align-items:center;gap:4px;white-space:nowrap;padding:0;opacity:1; }
+#app[data-input-mode="keyboard"] .key-hint > span { margin-left:2px; }
+#app[data-input-mode="keyboard"] .key-hint i,
+#app[data-input-mode="keyboard"] .keyboard-help-list i { font-size:8px;font-style:normal;color:#78938d; }
+#app[data-input-mode="keyboard"] .key-hint kbd {
+  display:inline-block;font-size:11px;line-height:1;min-width:20px;
+  padding:4px 5px;text-align:center;letter-spacing:0;background:#fffef8;
+  border:1px solid #b6c9ba;box-shadow:0 2px 0 #b6c9ba;border-radius:4px;
+}
+#app[data-input-mode="keyboard"] .auto-throttle-button kbd { display:inline-block; }
+#app[data-input-mode="keyboard"] .nitro-panel small { display:block; }
+#app[data-input-mode="keyboard"] .drift-heading > span:last-child { display:inline; }
+#app[data-input-mode="keyboard"] .keyboard-help-list { display:block; }
+#app[data-input-mode="keyboard"] .keyboard-help-list .help-keys { width:110px;flex-wrap:wrap;align-items:center; }
+#app[data-input-mode="keyboard"] .keyboard-help-list kbd { font-size:11px;padding:7px; }
+#app[data-input-mode="keyboard"] .keyboard-help-footnote { display:block; }
+#app[data-input-mode="keyboard"] .race-hud .speed-panel { bottom:max(44px,calc(var(--keyboard-hint-height,32px) + 24px)); }
+#app[data-input-mode="keyboard"] .race-hud .nitro-panel { bottom:max(54px,calc(var(--keyboard-hint-height,32px) + 24px)); }
+@media (max-width:1050px), (max-height:600px) {
+  #app[data-input-mode="keyboard"] .race-hint { gap:7px;font-size:9px;padding:7px 9px; }
+  #app[data-input-mode="keyboard"] .key-hint { gap:3px; }
+  #app[data-input-mode="keyboard"] .key-hint kbd { min-width:17px;font-size:9px;padding:4px; }
+  #app[data-input-mode="keyboard"] .keyboard-guide { gap:8px;font-size:9px; }
+  #app[data-input-mode="keyboard"] .race-hud .speed-panel,
+  #app[data-input-mode="keyboard"] .race-hud .nitro-panel { bottom:max(85px,calc(var(--keyboard-hint-height,32px) + 24px)); }
+}
+@media (max-width:600px) {
+  #app[data-input-mode="keyboard"] .race-hint { max-width:calc(100% - 20px);gap:6px; }
+  #app[data-input-mode="keyboard"] .menu-footer { margin-bottom:20px; }
+}
+@media (min-width:1025px) {
+  #app[data-input-mode="keyboard"] .menu-copy {
+    top:clamp(100px,13vh,190px);bottom:calc(var(--keyboard-menu-height,38px) + 50px);
+    overflow-y:auto;scrollbar-width:thin;padding-right:8px;pointer-events:auto;
+  }
+}
+@media (orientation:landscape) and (max-height:560px) and (max-width:1024px) {
+  #app[data-input-mode="keyboard"] .menu-copy { bottom:calc(var(--keyboard-menu-height,38px) + var(--safe-bottom) + 8px); }
+}

@@ -12,6 +12,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':
 
 import { TouchControls } from './touch-controls.js';
 import { MobileExperience } from './mobile.js';
+import { KEYBOARD_ACTIONS, DEFAULT_KEY_BINDINGS, validateKeyBindings, keyLabel } from './keyboard-bindings.js';
 
 export class UI {
   constructor(callbacks = {}) {
@@ -74,8 +75,18 @@ export class UI {
     this.el('.top-actions').append(leaveButton);
     const settingsButton=document.createElement('button');settingsButton.className='icon-button settings-button';settingsButton.setAttribute('aria-label','游戏设置');settingsButton.title='游戏设置';settingsButton.textContent='⚙';this.el('.top-actions').append(settingsButton);
     this.bind();
+    const keyboardHelp=this.el('.help-list').cloneNode(false);keyboardHelp.classList.add('keyboard-help-list');
+    this.el('.help-list').classList.add('touch-help-list');this.el('.touch-help-list').after(keyboardHelp);
+    const keyboardFootnote=this.el('.help-footnote').cloneNode(false);keyboardFootnote.classList.add('keyboard-help-footnote');
+    this.el('.help-footnote').classList.add('touch-help-footnote');this.el('.touch-help-footnote').after(keyboardFootnote);
+    this.setKeyBindings(DEFAULT_KEY_BINDINGS);
+    if(this.root.ownerDocument.defaultView.ResizeObserver){
+      this.hintObserver=new this.root.ownerDocument.defaultView.ResizeObserver(()=>this.measureKeyboardHint());
+      this.hintObserver.observe(this.el('.race-hint'));
+      this.hintObserver.observe(this.el('.menu-footer'));
+    }
     this.setAutoThrottle(this.autoThrottle,false);
-    this.mobile=new MobileExperience(this.root,{clear:()=>this.clearTouch(),toast:text=>this.showToast(text),mode:(_touch,hardware)=>{if(!this.autoThrottleChosen&&!this.root.classList.contains('in-race'))this.setAutoThrottle(hardware,false);}});
+    this.mobile=new MobileExperience(this.root,{clear:()=>{this.clearTouch();this.callbacks.onInputModeChange?.();},toast:text=>this.showToast(text),mode:(touch,hardware)=>{if(!this.autoThrottleChosen&&!this.root.classList.contains('in-race'))this.setAutoThrottle(touch&&hardware,false);}});
   }
 
   bind() {
@@ -197,7 +208,42 @@ export class UI {
   }
 
   setPaused(paused) { this.el('.pause-overlay').hidden = !paused||Boolean(this.mobile?.blocked)||Boolean(this.settingsOpen); this.clearTouch(); }
-  setOnline(active) { this.el('.leave-race-button').hidden = !active; this.el('.pause-button').hidden = active || this.phase === 'menu' || this.phase === 'finished';this.el('.rotate-status').textContent=active?'联机比赛持续进行，也可先竖屏继续。':'单人比赛已为你暂停。'; }
+  setOnline(active) { this.online=Boolean(active);this.el('.leave-race-button').hidden = !active; this.el('.pause-button').hidden = active || this.phase === 'menu' || this.phase === 'finished';this.el('.rotate-status').textContent=active?'联机比赛持续进行，也可先竖屏继续。':'单人比赛已为你暂停。';this.all('[data-action-hint="pause"],[data-action-hint="restart"]').forEach(hint=>{hint.hidden=this.online;});this.updateKeyboardFootnote(); }
+  updateKeyboardFootnote() {
+    if(!this.bindings)return;
+    const text=action=>this.bindings[action].map(keyLabel).join(' / ');
+    this.el('.keyboard-help-footnote').textContent=this.online?'联机比赛持续进行；暂停和重新比赛仅在单人模式可用。设置中可自定义电脑键位。':`${text('pause')} 暂停 / 继续 · ${text('restart')} 重新比赛（单人） · 设置中可自定义电脑键位`;
+  }
+  measureKeyboardHint(){
+    for(const [selector,variable] of [['.race-hint','--keyboard-hint-height'],['.menu-footer','--keyboard-menu-height']]){
+      const height=this.el(selector).getBoundingClientRect().height;if(height>0)this.root.style.setProperty(variable,`${Math.ceil(height)}px`);
+    }
+  }
+  setKeyBindings(bindings) {
+    this.bindings=validateKeyBindings(bindings);
+    const labels=action=>{
+      const codes=this.bindings[action];
+      return codes.length===2&&codes.includes('ShiftLeft')&&codes.includes('ShiftRight')?['Shift']:codes.map(keyLabel);
+    };
+    const text=action=>labels(action).join(' / ');
+    const chips=action=>labels(action).map(label=>`<kbd>${escapeHTML(label)}</kbd>`).join('<i aria-hidden="true">/</i>');
+    const guide=KEYBOARD_ACTIONS.map(({id,label})=>`<span class="key-hint" data-action-hint="${id}"${this.online&&['pause','restart'].includes(id)?' hidden':''}>${chips(id)}<span>${escapeHTML(label)}</span></span>`).join('');
+    this.el('.keyboard-guide').innerHTML=guide;this.el('.keyboard-guide').setAttribute('aria-label','电脑驾驶键位');
+    this.el('.race-hint').innerHTML=guide;this.el('.race-hint').setAttribute('aria-label','电脑驾驶键位');
+    this.el('.auto-throttle-button kbd').textContent=text('autoThrottle');
+    this.el('.auto-throttle-button').title=`自动油门（${text('autoThrottle')}）`;
+    this.el('.nitro-panel small').innerHTML=`${chips('nitro')} 释放加速`;
+    this.el('.drift-heading > span:last-child').textContent=text('drift');
+    const help=[
+      ['throttle','踩下油门',`持续按住 ${text('throttle')} 加速，${text('brake')} 刹车；${text('autoThrottle')} 切换自动油门。`],
+      ['left','转向与过弯',`${text('left')} 向左，${text('right')} 向右。草地会让赛车减速。`],
+      ['drift','漂移，攒一点惊喜','转弯时按住漂移，蓄力后松开获得加速。'],
+      ['nitro','释放晴空氮气','漂移补充能量，按住氮气键提速。'],
+    ];
+    this.el('.keyboard-help-list').innerHTML=help.map(([action,title,description])=>`<div><span class="help-keys">${chips(action)}</span><p><strong>${title}</strong><small>${escapeHTML(description)}</small></p></div>`).join('');
+    this.updateKeyboardFootnote();
+    this.measureKeyboardHint();
+  }
   setAutoThrottle(active,remember=true) { this.autoThrottle = !!active; const button = this.el('.auto-throttle-button'); button.classList.toggle('active', this.autoThrottle); button.setAttribute('aria-pressed', this.autoThrottle);if(remember){this.autoThrottleChosen=true;this.callbacks.onAutoThrottleChange?.(this.autoThrottle);} }
   setMuted(muted) { this.muted = !!muted; const button = this.el('.sound-button'); button.classList.toggle('muted', this.muted); button.setAttribute('aria-label', this.muted ? '开启声音' : '关闭声音'); button.title = this.muted ? '开启声音' : '关闭声音'; }
   setControlLayout(layout) {

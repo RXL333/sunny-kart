@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { drivingInput } from '../src/input.js';
 import { stepKartPhysics } from '../src/game/physics.js';
+import { DEFAULT_KEY_BINDINGS, assignKeyBinding } from '../src/keyboard-bindings.js';
 
 test('left/right keyboard and touch controls turn toward the matching side of the chase camera',()=>{
   for(const heading of [0,.8,2.4,-2.6]) {
@@ -37,4 +38,17 @@ test('custom sensitivity softens either control method without reversing it; mod
     assert.equal(soft.steer,full.steer*.5);assert.equal(soft.throttle,1);
   }
   assert.deepEqual(drivingInput(new Set(['KeyW','KeyA','Space']),{drift:true},true,{blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false});
+});
+
+test('custom keyboard mappings drive the same physics inputs and replacing both keys retires the defaults',()=>{
+  let bindings=DEFAULT_KEY_BINDINGS;
+  const custom={throttle:['KeyI','Numpad8'],brake:['KeyK','Numpad5'],left:['KeyJ','Numpad4'],right:['KeyL','Numpad6'],drift:['KeyU','Numpad7'],nitro:['KeyO','Numpad9']};
+  for(const [action,codes] of Object.entries(custom))for(const [slot,code] of codes.entries()){
+    const result=assignKeyBinding(bindings,action,slot,code);assert.equal(result.error,null);bindings=result.bindings;
+  }
+  assert.deepEqual(drivingInput(new Set(['KeyI','KeyK','KeyJ','KeyU','KeyO']),{},false,{bindings}),{throttle:1,brake:1,steer:1,drift:true,nitro:true});
+  assert.equal(drivingInput(new Set(['KeyL']),{},false,{bindings}).steer,-1);
+  assert.deepEqual(drivingInput(new Set(['KeyW','ArrowUp','KeyS','ArrowDown','KeyA','ArrowLeft','KeyD','ArrowRight','ShiftLeft','Space']),{},false,{bindings}),{throttle:0,brake:0,steer:0,drift:false,nitro:false});
+  assert.equal(drivingInput(new Set(['Numpad8']),{brake:1,steer:-1},false,{bindings}).throttle,1);
+  assert.deepEqual(drivingInput(new Set(['KeyI']),{},true,{bindings,blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false});
 });
