@@ -10,6 +10,9 @@ const boltIcon = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true
 const timeText = value => { const seconds = Math.max(0, Number(value) || 0); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${(seconds % 60).toFixed(2).padStart(5, '0')}`; };
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+import { TouchControls } from './touch-controls.js';
+import { MobileExperience } from './mobile.js';
+
 export class UI {
   constructor(callbacks = {}) {
     this.callbacks = callbacks;
@@ -17,13 +20,13 @@ export class UI {
     this.difficulty = 'normal';
     this.phase = 'menu';
     this.autoThrottle = false;
+    this.autoThrottleChosen=false;
     this.touchState = { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false };
-    this.touchDirections = { left: false, right: false };
     this.root = document.querySelector('#app');
     this.root.innerHTML = `
       <header class="topbar">
         <a class="brand" href="#" aria-label="晴空卡丁车首页"><span class="brand-emblem">S<span>★</span></span><span class="brand-word">晴空卡丁车<small>SUNNY KART</small></span></a>
-        <div class="top-actions"><span class="network-status" hidden></span><button class="icon-button sound-button" aria-label="关闭声音" title="声音">${volumeIcon}</button><button class="icon-button help-button" aria-label="查看操作说明" title="操作说明">?</button><button class="icon-button pause-button" aria-label="暂停比赛" title="暂停比赛" hidden>${pauseIcon}</button></div>
+        <div class="top-actions"><span class="network-status" hidden></span><button class="icon-button fullscreen-button" aria-label="全屏游玩" title="全屏游玩" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button><button class="icon-button sound-button" aria-label="关闭声音" title="声音">${volumeIcon}</button><button class="icon-button help-button" aria-label="查看操作说明" title="操作说明">?</button><button class="icon-button pause-button" aria-label="暂停比赛" title="暂停比赛" hidden>${pauseIcon}</button></div>
       </header>
       <main class="menu-screen">
         <div class="menu-copy"><div class="eyebrow"><span class="sun-symbol">✳</span> 阳光海岛大奖赛 <span class="edition">VOL. 01</span></div><h1>把快乐，<br>开上<span class="title-sky">晴空<svg viewBox="0 0 160 18" aria-hidden="true"><path d="M4 12Q76-3 155 9"/></svg></span>。</h1><p class="menu-description">海风正好，弯道在前。<br>和小伙伴一起，漂移进一个晴朗的好日子。</p>
@@ -32,7 +35,7 @@ export class UI {
         <div class="start-actions"><button class="primary-button start-button"><span>出发，去兜风</span><span class="button-arrow">${arrowIcon}</span></button><button class="friend-button" aria-label="打开好友联机"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 6a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 5"/></svg><span>好友联机</span></button></div>
         <div class="ready-line"><span class="ready-dot"></span><span class="loading-label">3 圈竞速 · 8 位车手 · 一路好心情</span></div></div>
         <div class="course-stamp"><span class="course-number">01</span><div><span>今日目的地</span><strong>晴风海岸</strong><small>SUNSHINE COAST</small></div><span class="course-weather">☀<small>26°</small></span></div>
-        <footer class="menu-footer"><div class="keyboard-guide"><span><kbd>W A S D</kbd> 驾驶</span><span><kbd>SHIFT</kbd> 漂移</span><span><kbd>SPACE</kbd> 氮气</span></div><span class="footer-note">好好过弯，也好好看风景。</span></footer>
+        <footer class="menu-footer"><div class="keyboard-guide"><span><kbd>W A S D</kbd> 驾驶</span><span><kbd>SHIFT</kbd> 漂移</span><span><kbd>SPACE</kbd> 氮气</span></div><span class="mobile-hint">横屏更尽兴 · 左手转向，右手漂移与氮气</span><span class="footer-note">好好过弯，也好好看风景。</span></footer>
       </main>
       <section class="race-hud" aria-label="比赛信息" hidden>
         <button class="auto-throttle-button" aria-label="自动油门" aria-pressed="false"><span class="auto-dot"></span>自动油门 <kbd>Q</kbd></button>
@@ -54,6 +57,9 @@ export class UI {
     this.el = selector => this.root.querySelector(selector);
     this.all = selector => [...this.root.querySelectorAll(selector)];
     this.minimap = this.el('#minimap');
+    const rotate=document.createElement('section');rotate.className='overlay rotate-overlay';rotate.hidden=true;rotate.setAttribute('role','dialog');rotate.setAttribute('aria-modal','true');rotate.setAttribute('aria-labelledby','rotate-title');
+    rotate.innerHTML='<div class="rotate-card"><span class="rotate-phone" aria-hidden="true">↶ ▯</span><h2 id="rotate-title">横过手机，更好过弯。</h2><p>左手转向，右手漂移和氮气。<br><span class="rotate-status">单人比赛已为你暂停。</span></p><button class="primary-button rotate-fullscreen">全屏横向游玩 ↗</button><button class="plain-button rotate-dismiss">先竖屏继续</button></div>';this.root.append(rotate);
+    const touchHint=document.createElement('p');touchHint.className='touch-hint';touchHint.textContent='手机：默认自动油门；左侧左右转向，转弯时右手按住漂移、松开小喷，⚡ 按住释放氮气。刹车可降低车速；关闭自动油门后按住油门手动驾驶。';this.el('.help-list').before(touchHint);
     const overviewButton=document.createElement('button');overviewButton.className='overview-button';overviewButton.textContent='航拍全图 ↗';overviewButton.setAttribute('aria-label','航拍全图');
     this.el('.course-stamp > div').append(overviewButton);
     const overviewReturn=document.createElement('button');overviewReturn.className='overview-return';overviewReturn.textContent='← 返回发车区';overviewReturn.hidden=true;this.root.append(overviewReturn);
@@ -66,7 +72,10 @@ export class UI {
     leaveButton.textContent = '↗'; leaveButton.hidden = true;
     leaveButton.addEventListener('click', () => this.callbacks.onMenu?.());
     this.el('.top-actions').append(leaveButton);
+    const settingsButton=document.createElement('button');settingsButton.className='icon-button settings-button';settingsButton.setAttribute('aria-label','游戏设置');settingsButton.title='游戏设置';settingsButton.textContent='⚙';this.el('.top-actions').append(settingsButton);
     this.bind();
+    this.setAutoThrottle(this.autoThrottle,false);
+    this.mobile=new MobileExperience(this.root,{clear:()=>this.clearTouch(),toast:text=>this.showToast(text),mode:(_touch,hardware)=>{if(!this.autoThrottleChosen&&!this.root.classList.contains('in-race'))this.setAutoThrottle(hardware,false);}});
   }
 
   bind() {
@@ -98,18 +107,7 @@ export class UI {
     this.el('.start-room-button').addEventListener('click', () => this.callbacks.onStartRoom?.());
     this.el('.leave-room-button').addEventListener('click', () => { this.callbacks.onLeaveRoom?.(); this.room = null; this.showMenu(); });
     this.el('.copy-room-button').addEventListener('click', async () => { try { await navigator.clipboard.writeText(this.room?.code || ''); this.showToast('房间号已复制，邀请好朋友来追风吧'); } catch { this.showToast(`房间号：${this.room?.code || ''}`); } });
-    this.all('[data-touch]').forEach(button => {
-      const key = button.dataset.touch;
-      const set = active => {
-        button.classList.toggle('pressed', active);
-        if (key === 'left' || key === 'right') { this.touchDirections[key] = active; this.touchState.steer = Number(this.touchDirections.right) - Number(this.touchDirections.left); }
-        else this.touchState[key] = key === 'throttle' || key === 'brake' ? Number(active) : active;
-      };
-      button.addEventListener('pointerdown', e => { e.preventDefault(); button.setPointerCapture(e.pointerId); set(true); });
-      ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(event => button.addEventListener(event, () => set(false)));
-      button.addEventListener('contextmenu', e => e.preventDefault());
-    });
-    window.addEventListener('blur', () => this.clearTouch());
+    this.touchControls=new TouchControls(this.all('[data-touch]'),{state:this.touchState});
   }
 
   beginRace() {
@@ -122,6 +120,7 @@ export class UI {
     this.el('.touch-controls').hidden = false;
     this.root.classList.add('in-race');
     this.clearTouch();
+    this.mobile?.beginRace();
   }
 
   enterRace() { this.beginRace(); }
@@ -137,10 +136,11 @@ export class UI {
     this.el('.countdown').hidden = true;
     this.root.classList.remove('in-race');
     this.clearTouch();
+    this.mobile?.sync();
   }
 
-  hideOverlays() { this.all('.overlay').forEach(el => { el.hidden = true; }); }
-  clearTouch() { Object.assign(this.touchState, { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false }); this.touchDirections.left = this.touchDirections.right = false; this.all('[data-touch]').forEach(b => b.classList.remove('pressed')); }
+  hideOverlays() { this.all('.overlay:not(.settings-overlay)').forEach(el => { el.hidden = true; }); }
+  clearTouch() { this.touchControls?.clear(); }
 
   update(state = {}) {
     const player = state.player || {};
@@ -193,16 +193,23 @@ export class UI {
     this.el('.ready-dot').classList.toggle('loading', p < 1);
   }
 
-  setPaused(paused) { this.el('.pause-overlay').hidden = !paused; this.clearTouch(); }
-  setOnline(active) { this.el('.leave-race-button').hidden = !active; this.el('.pause-button').hidden = active || this.phase === 'menu' || this.phase === 'finished'; }
-  setAutoThrottle(active) { this.autoThrottle = !!active; const button = this.el('.auto-throttle-button'); button.classList.toggle('active', this.autoThrottle); button.setAttribute('aria-pressed', this.autoThrottle); }
+  setPaused(paused) { this.el('.pause-overlay').hidden = !paused||Boolean(this.mobile?.blocked)||Boolean(this.settingsOpen); this.clearTouch(); }
+  setOnline(active) { this.el('.leave-race-button').hidden = !active; this.el('.pause-button').hidden = active || this.phase === 'menu' || this.phase === 'finished';this.el('.rotate-status').textContent=active?'联机比赛持续进行，也可先竖屏继续。':'单人比赛已为你暂停。'; }
+  setAutoThrottle(active,remember=true) { this.autoThrottle = !!active; const button = this.el('.auto-throttle-button'); button.classList.toggle('active', this.autoThrottle); button.setAttribute('aria-pressed', this.autoThrottle);if(remember){this.autoThrottleChosen=true;this.callbacks.onAutoThrottleChange?.(this.autoThrottle);} }
   setMuted(muted) { this.muted = !!muted; const button = this.el('.sound-button'); button.classList.toggle('muted', this.muted); button.setAttribute('aria-label', this.muted ? '开启声音' : '关闭声音'); button.title = this.muted ? '开启声音' : '关闭声音'; }
+  setControlLayout(layout) {
+    const mirrored=layout==='left-handed',side=mirrored?'右侧':'左侧';
+    this.el('.mobile-hint').textContent=mirrored?'横屏更尽兴 · 右手转向，左手漂移与氮气':'横屏更尽兴 · 左手转向，右手漂移与氮气';
+    this.el('.touch-hint').textContent=`手机：默认自动油门；${side}左右转向，另一只手按住漂移、松开小喷，⚡ 按住释放氮气。刹车可降低车速；关闭自动油门后按住油门手动驾驶。`;
+    this.el('.rotate-card > p').firstChild.textContent=mirrored?'右手转向，左手漂移和氮气。':'左手转向，右手漂移和氮气。';
+  }
   showHelp() { this.resumeAfterHelp = this.phase === 'racing' || this.phase === 'countdown'; if (this.resumeAfterHelp) this.callbacks.onPause?.(); this.el('.help-overlay').hidden = false; this.clearTouch(); this.el('.close-help').focus(); }
   hideHelp() { this.el('.help-overlay').hidden = true; if (this.resumeAfterHelp) { this.el('.pause-overlay').hidden = true; this.callbacks.onResume?.(); } this.resumeAfterHelp = false; }
   closeHelp() { this.hideHelp(); }
 
   showResults(results, best) {
     this.phase = 'finished';
+    this.root.classList.remove('in-race');this.mobile?.sync();
     this.hideOverlays();
     this.el('.results-overlay').hidden = false;
     this.el('.touch-controls').hidden = true;

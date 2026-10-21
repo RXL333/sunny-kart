@@ -1,0 +1,290 @@
+/* Phone controls use the real input capabilities, including wide landscape phones. */
+#game, #app { height:100%; height:100dvh; }
+#app {
+  --safe-left: max(16px, env(safe-area-inset-left, 0px));
+  --safe-right: max(16px, env(safe-area-inset-right, 0px));
+  --safe-top: max(10px, env(safe-area-inset-top, 0px));
+  --safe-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+}
+.mobile-hint, .touch-hint, .fullscreen-button { display: none; }
+#app.touch-device .touch-controls { display: block; }
+#app .rotate-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 12px) var(--safe-right) calc(var(--safe-bottom) + 12px) var(--safe-left);
+  background: #153e4de8;
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#app .rotate-overlay > div {
+  width: min(100%, 360px);
+  padding: 26px 23px;
+  border: 2px solid var(--ink);
+  border-radius: 25px;
+  background: var(--cream);
+  box-shadow: 0 7px 0 #102f39;
+  text-align: center;
+}
+#app .rotate-overlay h2 { margin: 10px 0; font-size: 24px; }
+#app .rotate-overlay p { font-size: 13px; line-height: 1.8; color: #607e7c; }
+#app .rotate-phone { display: block; font-size: 48px; line-height: 1.2; color: #2d8f80; }
+#app .rotate-overlay .rotate-status { min-height: 20px; font-size: 11px; margin: 5px 0; }
+#app .rotate-fullscreen, #app .rotate-dismiss {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+#app .rotate-fullscreen { margin-top: 10px; background: var(--yellow); border: 1px solid var(--ink); }
+#app .rotate-dismiss { margin-top: 8px; background: transparent; color: #607e7c; }
+
+/* Personal preferences never reduce the controls below comfortable touch sizes. */
+@media (any-pointer: coarse), (max-width:600px), (max-width:1024px) and (max-height:560px) {
+  #app { --button-effective:min(var(--control-size,64px),calc((100vw - 64px)/4)); --controls-bottom:max(var(--control-bottom,18px),env(safe-area-inset-bottom,0px)); }
+  #app .touch-controls .touch-steering { left:var(--safe-left); right:auto; bottom:var(--controls-bottom); gap:10px; }
+  #app .touch-controls .touch-steering button { width:var(--button-effective); height:var(--button-effective); }
+  #app .touch-controls .touch-driving { right:var(--safe-right); left:auto; bottom:var(--controls-bottom); grid-template-columns:calc(var(--button-effective)*.9) var(--button-effective); grid-template-rows:max(48px,calc(var(--button-effective)*.85)) var(--button-effective); gap:8px; }
+  #app .touch-controls button { background:rgb(255 250 240 / var(--control-opacity,.78)); }
+  #app .touch-controls .touch-throttle { background:rgb(234 250 117 / var(--control-opacity,.78))!important; }
+  #app .touch-controls button.pressed { background:#eafa75; }
+  #app[data-control-layout="left-handed"] .touch-controls .touch-steering { left:auto; right:var(--safe-right); }
+  #app[data-control-layout="left-handed"] .touch-controls .touch-driving { right:auto; left:var(--safe-left); }
+}
+
+/* Small-window fallback also makes the landscape layout inspectable on desktop. */
+@media (any-pointer: coarse), (max-width: 600px), (max-width: 1024px) and (max-height: 560px) {
+  html, body { overscroll-behavior: none; }
+  #game { touch-action: none; }
+  #app { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #app input { -webkit-user-select: text; user-select: text; }
+  #app button, #app a { touch-action: manipulation; }
+  #app button:hover:not(:disabled) { transform: none; }
+  #app .touch-controls { display: block; touch-action: none; }
+  #app .topbar, #app.in-race .topbar {
+    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+    align-items: flex-start;
+  }
+  #app .brand { min-height: 44px; gap: 8px; }
+  #app .brand-emblem { width: 38px; height: 38px; font-size: 27px; line-height: 35px; }
+  #app .brand-word { font-size: 13px; }
+  #app .brand-word small { font-size: 6px; }
+  #app .top-actions { gap: 6px; align-items: flex-start; }
+  #app .icon-button { width: 44px; height: 44px; backdrop-filter: none; background: #fffaf0e6; }
+  #app .icon-button svg { width: 20px; height: 20px; }
+  #app .fullscreen-button { display: grid; }
+  #app .network-status { max-width: 140px; font-size: 9px; padding: 8px 10px; backdrop-filter: none; }
+  #app .keyboard-guide, #app .race-hint { display: none; }
+  #app .mobile-hint { display: block; font-size: 10px; line-height: 1.7; }
+  #app .touch-hint { display: block; padding: 10px 12px; border-radius: 10px; background: #eaf1d8; font-size: 11px; line-height: 1.8; color: #486b64; }
+  #app .driver-option { min-height: 60px; }
+  #app .difficulty-options button { min-height: 44px; font-size: 11px; }
+  #app .primary-button, #app .friend-button, #app .plain-button { min-height: 48px; }
+  #app .close-button { width: 44px; height: 44px; right: 10px; top: 8px; }
+  #app .overview-button, #app .copy-room-button, #app .join-room-button { min-height: 44px; min-width: 44px; }
+  #app .overview-button { padding: 9px 12px; }
+  #app .overview-return { left: var(--safe-left); bottom: var(--safe-bottom); min-height: 48px; }
+  #app .overlay {
+    padding: calc(var(--safe-top) + 8px) var(--safe-right) calc(var(--safe-bottom) + 8px) var(--safe-left);
+    backdrop-filter: none;
+    background: #153e4d9c;
+    touch-action: pan-y;
+  }
+  #app .dialog {
+    width: min(100%, 460px);
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 24px);
+    padding: 26px 23px 20px;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    scrollbar-width: thin;
+  }
+  #app .join-form input { font-size: 16px; min-height: 48px; }
+  #app .join-form input::placeholder { font-size: 12px; }
+  #app .lobby-player strong { font-size: 11px; }
+  #app .lobby-player small { font-size: 9px; }
+  #app .lobby-status { font-size: 10px; }
+  #app .result-row { min-height: 34px; }
+  #app .result-row-time { font-size: 10px; }
+  #app .toast { top: max(27%, calc(var(--safe-top) + 70px)); font-size: 11px; max-width: min(85vw, 380px); }
+
+  #app .race-hud { --hud-top: calc(var(--safe-top) + 58px); }
+  #app .lap-panel { left: var(--safe-left); top: var(--hud-top); min-width: 100px; padding-left: 9px; border-left-width: 3px; }
+  #app .hud-caption { font-size: 8px; letter-spacing: 1px; }
+  #app .lap-value { font-size: 34px; }
+  #app .lap-total { font-size: 15px; }
+  #app .race-time { font-size: 12px; }
+  #app .course-zone { font-size: 10px; margin-top: 5px; }
+  #app .position-panel { top: calc(var(--safe-top) + 1px); }
+  #app .position-value { font-size: 46px; letter-spacing: -3px; }
+  #app .position-suffix { font-size: 11px; margin-top: 9px; }
+  #app .position-total { font-size: 11px; margin-left: 3px; }
+  #app .position-panel small { font-size: 7px; letter-spacing: 1px; margin-top: 2px; }
+  #app .minimap-panel { right: var(--safe-right); top: var(--hud-top); width: 126px; padding: 5px 7px 7px; border-radius: 14px; backdrop-filter: none; background: #fffaf0d9; }
+  #app .minimap-panel canvas { height: 84px; }
+  #app .minimap-panel > span { font-size: 7px; letter-spacing: 0; }
+  #app .auto-throttle-button { left: var(--safe-left); top: calc(var(--hud-top) + 116px); min-height: 44px; padding: 8px 12px; font-size: 10px; backdrop-filter: none; background: #fffaf0e6; }
+  #app .auto-throttle-button kbd { display: none; }
+  #app .auto-throttle-button.active { background: #eafa75ed; }
+  #app .touch-steering { left: var(--safe-left); bottom: var(--safe-bottom); gap: 12px; }
+  #app .touch-steering button { width: 72px; height: 68px; font-size: 24px; }
+  #app .touch-driving { right: var(--safe-right); bottom: var(--safe-bottom); grid-template-columns: 64px 72px; grid-template-rows: 56px 62px; gap: 10px; }
+  #app .touch-controls button { border-radius: 20px; backdrop-filter: none; background: rgb(255 250 240 / var(--control-opacity,.78)); border-color: #ffffffdc; box-shadow: 0 4px 0 #203c4640; transition: background .08s, transform .08s; touch-action: none; }
+  #app .touch-controls button.pressed { background: var(--yellow); transform: translateY(3px); box-shadow: 0 1px 0 #203c4640; }
+  #app .touch-driving button { font-size: 13px; }
+  #app .touch-drift { font-size: 13px !important; }
+  #app .touch-nitro svg { width: 26px; height: 26px; }
+  #app .touch-brake { opacity: 1; }
+  #app .speed-panel { left: 50%; right: auto; bottom: calc(var(--safe-bottom) + 67px); width: 144px; transform: translateX(-50%); text-align: center; filter: none; }
+  #app .speed-value { font-size: 43px; letter-spacing: -3px; text-shadow: 0 1px 5px #fff; }
+  #app .speed-unit { display: inline-block; margin-left: 6px; font-size: 8px; letter-spacing: 1px; }
+  #app .drift-heading { font-size: 8px; margin: 4px 0; }
+  #app .drift-heading > span:last-child { display: none; }
+  #app .drift-track { height: 5px; background: #fffaf0c4; }
+  #app .nitro-panel { left: 50%; bottom: var(--safe-bottom); transform: translateX(-50%); width: 152px; padding: 8px 10px; gap: 7px; border-radius: 14px; backdrop-filter: none; background: #fffaf0e0; }
+  #app .nitro-symbol, #app .nitro-symbol svg { width: 23px; height: 23px; }
+  #app .nitro-heading { gap: 4px; }
+  #app .nitro-heading strong { font-size: 9px; letter-spacing: 0; }
+  #app .nitro-value { font-size: 9px; }
+  #app .nitro-track { margin: 5px 0 0; height: 5px; }
+  #app .nitro-panel small { display: none; }
+}
+
+/* Portrait remains playable, with scrolling menus instead of clipped buttons. */
+@media (max-width: 600px) and (orientation: portrait) {
+  #app .menu-screen { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; pointer-events: auto; background: linear-gradient(180deg, #eff5e6ad, #eff5e6f5 27%, #eff5e6e8 80%, #eff5e6c9); padding-bottom: var(--safe-bottom); }
+  #app .menu-copy { position: relative; inset: auto; width: auto; margin: calc(var(--safe-top) + 82px) 24px 24px; }
+  #app h1 { font-size: clamp(42px, 13.3vw, 58px); line-height: 1.2; margin: 18px 0; letter-spacing: -3px; }
+  #app .eyebrow { font-size: 9px; letter-spacing: 1px; }
+  #app .menu-description { font-size: 11px; line-height: 1.8; margin: 0 0 25px; }
+  #app .driver-picker, #app .difficulty-row, #app .start-actions { width: 100%; max-width: none; }
+  #app .section-label { font-size: 11px; }
+  #app .driver-motto { font-size: 9px; }
+  #app .driver-options { gap: 8px; }
+  #app .driver-option { flex: 1; width: 0; min-height: 70px; height: auto; padding: 8px; gap: 4px; font-size: 11px; }
+  #app .driver-portrait, #app .driver-portrait svg { width: 36px; height: 36px; }
+  #app .difficulty-row { flex-wrap: wrap; margin: 22px 0; gap: 8px; }
+  #app .difficulty-options { flex: 1; justify-content: space-between; }
+  #app .difficulty-options button { flex: 1; padding: 7px; font-size: 10px; }
+  #app .primary-button { min-height: 54px; }
+  #app .friend-button { width: 72px; font-size: 10px; }
+  #app .ready-line { font-size: 9px; margin-top: 15px; }
+  #app .menu-screen .course-stamp { position: relative; inset: auto; width: fit-content; display: flex; margin: 0 24px 16px; padding: 0; border: 0; background: transparent; box-shadow: none; transform: none; backdrop-filter: none; }
+  #app .course-stamp .course-number, #app .course-stamp .course-weather, #app .course-stamp > div > span, #app .course-stamp > div > strong, #app .course-stamp > div > small { display: none; }
+  #app .menu-footer { position: relative; inset: auto; margin: 0 24px 10px; }
+  #app .footer-note { display: none; }
+  #app .topbar .network-status { position: absolute; top: calc(var(--safe-top) + 50px); right: var(--safe-right); max-width: 150px; font-size: 9px; }
+  #app .position-panel { top: calc(var(--safe-top) + 70px); }
+  #app .touch-steering { gap: 8px; }
+  #app .touch-steering button { width: 62px; height: 64px; }
+  #app .touch-driving { grid-template-columns: 60px 64px; grid-template-rows: 54px 60px; gap: 8px; }
+  #app .nitro-panel { left: var(--safe-left); bottom: calc(var(--controls-bottom) + var(--button-effective) + 16px); transform: none; width: 132px; }
+  #app .speed-panel { right: var(--safe-right); left: auto; bottom: calc(var(--controls-bottom) + var(--button-effective)*1.85 + 24px); transform: none; width: 132px; }
+  #app .speed-value { font-size: 41px; }
+  #app .auto-throttle-button { top: calc(var(--safe-top) + 190px); }
+  #app .minimap-panel { width: 108px; }
+  #app .minimap-panel canvas { height: 73px; }
+  #app[data-control-layout="left-handed"] .nitro-panel { left:auto; right:var(--safe-right); }
+  #app[data-control-layout="left-handed"] .speed-panel { left:var(--safe-left); right:auto; }
+  #app .topbar .network-status { left:var(--safe-left);right:auto;top:calc(var(--safe-top) + 160px);max-width:132px; }
+}
+
+/* Landscape phone: action targets stay thumb-sized while HUD leaves the road open. */
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 1024px) {
+  #app .menu-screen { background: linear-gradient(90deg, #eff5e6e8, #eff5e6d9 46%, #eff5e6bd); overflow-y: auto; pointer-events: auto; touch-action: pan-y; }
+  #app .menu-copy { position: absolute; top: calc(var(--safe-top) + 57px); bottom: calc(var(--safe-bottom) + 48px); left: calc(var(--safe-left) + 4px); right: calc(var(--safe-right) + 4px); width: auto; display: grid; grid-template-columns: minmax(200px, .95fr) minmax(280px, 1fr); column-gap: clamp(24px, 5vw, 70px); align-content: center; }
+  #app .eyebrow { grid-column: 1; grid-row: 1; font-size: 9px; letter-spacing: 1px; }
+  #app .sun-symbol { font-size: 19px; }
+  #app .edition { font-size: 6px; }
+  #app h1 { grid-column: 1; grid-row: 2; font-size: clamp(37px, 5.4vw, 50px); line-height: 1.16; margin: 10px 0 8px; letter-spacing: -2px; }
+  #app .title-sky svg { height: 9px; bottom: -4px; }
+  #app .menu-description { grid-column: 1; grid-row: 3 / 5; font-size: 10px; line-height: 1.8; width: 95%; max-width: 310px; margin: 3px 0 0; }
+  #app .menu-description br { display: none; }
+  #app .driver-picker { grid-column: 2; grid-row: 1 / 3; width: 100%; align-self: end; }
+  #app .section-label { font-size: 10px; letter-spacing: 0; }
+  #app .driver-motto { font-size: 9px; }
+  #app .driver-options { margin-top: 7px; gap: 8px; }
+  #app .driver-option { width: 0; flex: 1; height: 60px; min-height: 60px; font-size: 11px; padding: 6px; gap: 4px; border-radius: 12px; }
+  #app .driver-portrait, #app .driver-portrait svg { width: 34px; height: 34px; }
+  #app .difficulty-row { grid-column: 2; grid-row: 3; width: 100%; margin: 10px 0; gap: 8px; }
+  #app .difficulty-options { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); padding: 2px; gap: 1px; }
+  #app .difficulty-options button { min-height: 44px; padding: 5px; font-size: 10px; }
+  #app .start-actions { grid-column: 2; grid-row: 4; width: 100%; gap: 9px; }
+  #app .primary-button { min-height: 48px; font-size: 12px; padding: 0 13px; gap: 9px; }
+  #app .friend-button { min-height: 48px; width: 64px; font-size: 9px; gap: 1px; }
+  #app .friend-button svg { width: 19px; height: 19px; }
+  #app .ready-line { grid-column: 2; grid-row: 5; font-size: 8px; margin-top: 10px; letter-spacing: 0; }
+  #app .menu-footer { left: calc(var(--safe-left) + 4px); right: 140px; bottom: var(--safe-bottom); }
+  #app .mobile-hint { font-size: 10px; }
+  #app .menu-screen .course-stamp { display: flex; right: var(--safe-right); left: auto; bottom: var(--safe-bottom); transform: none; padding: 0; background: transparent; border: 0; box-shadow: none; backdrop-filter: none; }
+  #app .course-stamp .course-number, #app .course-stamp .course-weather, #app .course-stamp > div > span, #app .course-stamp > div > strong, #app .course-stamp > div > small { display: none; }
+  #app .overview-button { margin: 0; font-size: 10px; }
+  #app .brand-word { font-size: 12px; }
+  #app .network-status { position:absolute; left:calc(var(--safe-left) + 145px); right:auto; top:var(--safe-top); max-width:110px; font-size:8px; padding:6px 8px; }
+  #app .race-hud { --hud-top: calc(var(--safe-top) + 55px); }
+  #app .lap-panel { min-width: 95px; }
+  #app .lap-value { font-size: 29px; }
+  #app .lap-total { font-size: 13px; }
+  #app .race-time { font-size: 11px; margin-top: 3px; }
+  #app .course-zone { font-size: 9px; margin-top: 4px; }
+  #app .position-value { font-size: 39px; }
+  #app .position-suffix { font-size: 10px; margin-top: 7px; }
+  #app .position-panel small { display: none; }
+  #app .minimap-panel { width: 105px; padding: 4px 6px 6px; }
+  #app .minimap-panel canvas { height: 66px; }
+  #app .minimap-panel > span { font-size: 6px; }
+  #app .auto-throttle-button { left:calc(var(--safe-left) + 50px); top:var(--safe-top); font-size:9px; min-height:44px; padding:6px 10px; }
+  #app .touch-steering { gap: 10px; }
+  #app .touch-steering button { width: 68px; height: 66px; }
+  #app .touch-driving { grid-template-columns: 62px 70px; grid-template-rows: 54px 60px; gap: 9px; }
+  #app .speed-panel { left:calc(50% - 82px); bottom:var(--safe-bottom); width:96px; }
+  #app .speed-value { font-size:30px; }
+  #app .speed-panel .drift-heading { margin:2px 0;font-size:7px; }
+  #app .speed-panel .drift-track { height:4px; }
+  #app .nitro-panel { left:calc(50% + 54px); bottom:calc(var(--safe-bottom) + 4px); width:136px; padding:7px 9px; }
+  #app .nitro-heading strong { font-size: 8px; }
+  #app .countdown > span { font-size: 94px; }
+  #app .countdown small { font-size: 9px; margin-top: 20px; }
+  #app .toast { top: calc(var(--safe-top) + 57px); max-width: 45vw; font-size: 10px; padding: 9px 15px; }
+  #app .dialog { max-width: 490px; max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 24px); padding: 20px 25px; }
+  #app .dialog h2 { font-size: 21px; margin: 10px 0; }
+  #app .dialog > p { margin-bottom: 15px; }
+  #app .help-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 17px 0; }
+  #app .help-list > div { margin: 0; gap: 8px; }
+  #app .help-list strong { font-size: 10px; }
+  #app .help-list small { font-size: 9px; }
+  #app .help-keys { width: 58px; }
+  #app .help-keys kbd { padding: 6px; font-size: 10px; }
+  #app .lobby-players { max-height: 150px; overflow-y: auto; }
+  #app .result-list { max-height: 128px; overflow-y: auto; }
+}
+
+@media (orientation: landscape) and (max-height: 340px) and (max-width: 1024px) {
+  #app .menu-copy { top: calc(var(--safe-top) + 48px); bottom: calc(var(--safe-bottom) + 42px); }
+  #app h1 { font-size: 35px; margin: 6px 0; }
+  #app .menu-description { display: none; }
+  #app .driver-option { min-height: 48px; height: 48px; }
+  #app .difficulty-row { margin: 6px 0; }
+  #app .ready-line { margin-top: 6px; }
+  #app .auto-throttle-button { top:var(--safe-top); }
+  #app .course-zone { display: none; }
+  #app .touch-steering button { width: 64px; height: 64px; }
+}
+
+/* A very narrow portrait screen still reserves room for both thumb clusters. */
+@media (orientation: portrait) and (max-width: 360px) {
+  #app .brand-word { display: none; }
+  #app .touch-steering button { width: 58px; }
+  #app .touch-steering { gap: 7px; }
+  #app .touch-driving { grid-template-columns: 56px 60px; gap: 7px; }
+  #app .driver-portrait, #app .driver-portrait svg { width: 30px; height: 30px; }
+  #app .driver-option { padding: 5px; }
+  #app .menu-copy { margin-left: 20px; margin-right: 20px; }
+}
+
+#app.overview-mode .menu-screen { background: none; overflow: hidden; }
+#app.overview-mode .menu-copy, #app.overview-mode .menu-footer, #app.overview-mode .menu-screen .course-stamp { display: none; }

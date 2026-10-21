@@ -1,4 +1,6 @@
 import './style.css';
+import './mobile.css';
+import './settings.css';
 import { track } from './game/track.js';
 import { Race } from './game/race.js';
 import { World } from './world.js';
@@ -7,19 +9,21 @@ import { Network } from './network.js';
 import { AudioEngine } from './audio.js';
 import { PHYSICS } from './game/physics.js';
 import { drivingInput } from './input.js';
+import { GameSettings } from './settings.js';
 
-let race=new Race(track),world,online=false,showedResults=false,selection={character:'fox',difficulty:'normal'};
+let race=new Race(track),world,settings,settingsResume=false,online=false,showedResults=false,rotationPaused=false,selection={character:'fox',difficulty:'normal'};
 const keys=new Set(),audio=new AudioEngine();
 let mute=false;try{mute=localStorage.getItem('sunny-muted')==='true';}catch{}
 audio.setMuted(mute);
-const clearKeys=()=>{keys.clear();if(ui.touchState)for(const key of Object.keys(ui.touchState))ui.touchState[key]=false;};
+const clearKeys=()=>{keys.clear();ui.clearTouch();};
 function pause(){if(!['racing','countdown'].includes(race.phase))return;if(online){ui.showToast('联机比赛持续进行，退出可返回大厅');return;}race.pause();ui.setPaused(true);clearKeys();}
 function resume(){race.resume();ui.setPaused(false);audio.unlock();}
-function mainMenu(){network.leave();online=false;ui.setOnline(false);clearKeys();race=new Race(track,selection);showedResults=false;ui.showMenu();world?.setLineup?.(race.racers);}
-function start(options=selection){network.leave();online=false;ui.setOnline(false);selection={...selection,...options};race=new Race(track,selection);race.start();showedResults=false;ui.setPaused(false);ui.enterRace?.();clearKeys();audio.unlock();world?.setLineup?.(race.racers);}
+function mainMenu(){network.leave();online=false;rotationPaused=false;ui.setOnline(false);clearKeys();race=new Race(track,selection);showedResults=false;ui.showMenu();world?.setLineup?.(race.racers);}
+function start(options=selection){network.leave();online=false;rotationPaused=false;ui.setOnline(false);selection={...selection,...options};race=new Race(track,selection);race.start();showedResults=false;ui.setPaused(false);ui.enterRace?.();clearKeys();audio.unlock();world?.setLineup?.(race.racers);}
 const ui=new UI({
   onStart:start,onPause:pause,onResume:resume,
   onOverview:active=>{if(world)world.overview=active;},
+  onAutoThrottleChange:active=>settings?.setValues({autoThrottle:active},{notify:false}),
   onCharacterChange:character=>{selection.character=character;if(race.phase==='menu'){race=new Race(track,selection);world?.setLineup?.(race.racers);}},
   onRestart:()=>{if(online){if(network.room?.hostId===network.id)network.start();else ui.showToast('等待房主开始下一场比赛');return;}start(selection);},onMenu:mainMenu,
   onMute:()=>{mute=!mute;audio.unlock();audio.setMuted(mute);ui.setMuted(mute);try{localStorage.setItem('sunny-muted',String(mute));}catch{}},
@@ -28,6 +32,13 @@ const ui=new UI({
   onLeaveRoom:mainMenu,onStartRoom:()=>{audio.unlock();network.start();},
 });
 ui.setMuted(mute);
+function applySettings(values){ui.autoThrottleChosen=true;ui.setAutoThrottle(values.autoThrottle,false);ui.setControlLayout(values.controlLayout);ui.clearTouch();audio.setVolume(values.soundVolume);world?.setGraphicsQuality(values.graphics);}
+settings=new GameSettings(document.querySelector('#app'),{
+  defaults:{autoThrottle:ui.mobile.hardwareTouch},onChange:applySettings,
+  onOpen:()=>{ui.settingsOpen=true;clearKeys();settingsResume=!online&&['racing','countdown'].includes(race.phase);if(settingsResume){race.pause();ui.setPaused(true);}},
+  onClose:()=>{ui.settingsOpen=false;clearKeys();if(settingsResume&&race.phase==='paused'){if(ui.mobile.blocked)rotationPaused=true;else resume();}settingsResume=false;},
+});
+applySettings(settings.values);
 const network=new Network({
   status:state=>ui.setNetwork(state),
   room:room=>{if(room.status==='lobby')ui.showLobby(room);},
@@ -47,8 +58,9 @@ function predictPlayer(duration,input){
   race.events.length=eventCount;
 }
 
-function readInput(){return drivingInput(keys,ui.touchState,ui.autoThrottle);}
+function readInput(){return drivingInput(keys,ui.touchState,ui.autoThrottle,{sensitivity:settings.values.steeringSensitivity,blocked:ui.mobile.blocked||settings.isOpen});}
 window.addEventListener('keydown',event=>{
+  if(settings.isOpen||ui.mobile.blocked)return;
   if(event.target instanceof HTMLInputElement)return;
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Tab'].includes(event.code)&&race.phase!=='menu')event.preventDefault();
   if(!event.repeat&&event.code==='Escape'){if(race.phase==='paused')resume();else if(['racing','countdown'].includes(race.phase))pause();}
@@ -57,6 +69,7 @@ window.addEventListener('keydown',event=>{
   keys.add(event.code);
 });
 window.addEventListener('keyup',e=>keys.delete(e.code));
+window.addEventListener('resize',clearKeys);
 window.addEventListener('blur',()=>{clearKeys();if(!online&&['countdown','racing'].includes(race.phase))pause();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){clearKeys();if(!online&&['countdown','racing'].includes(race.phase))pause();}});
 
@@ -68,9 +81,12 @@ function finish(){if(showedResults)return;showedResults=true;const key=`sunny-be
   ui.showResults(race.results,best);audio.event({type:'results'});
 }
 async function boot(){try{
-  ui.setLoading(.1);world=new World(document.querySelector('#game'),track);ui.setLoading(.55);await world.createKarts();await world.setLineup?.(race.racers);ui.setLoading(1);ui.setCourse(track);
+  ui.setLoading(.1);world=new World(document.querySelector('#game'),track);world.setGraphicsQuality(settings.values.graphics);ui.setLoading(.55);await world.createKarts();await world.setLineup?.(race.racers);ui.setLoading(1);ui.setCourse(track);
   let last=performance.now(),accumulator=0;
-  function frame(now){const dt=Math.min((now-last)/1000,.05);last=now;const input=readInput();network.update(now,input);
+  function frame(now){const dt=Math.min((now-last)/1000,.05);last=now;
+    if(!online&&ui.mobile.blocked&&!settings.isOpen&&['countdown','racing'].includes(race.phase)){rotationPaused=true;race.pause();ui.setPaused(true);clearKeys();}
+    else if(rotationPaused&&!ui.mobile.blocked&&!settings.isOpen&&!document.hidden){rotationPaused=false;if(race.phase==='paused'){race.resume();ui.setPaused(false);}}
+    const input=readInput();network.update(now,input);
     if(online){if(race.phase==='racing'&&!race.player.finished){predictPlayer(dt,input);for(const r of race.racers)if(r.id!==race.player.id){r.distance+=r.speed*dt;r.offset+=(r.lateralVelocity||0)*dt;}}if(race.phase==='racing')race.elapsed+=dt;}
     else{accumulator+=dt;while(accumulator>=1/60){race.update(1/60,input);accumulator-=1/60;}}
     for(const e of race.consumeEvents()){audio.event(e);if(e.type==='finish'&&online&&e.racerId===race.player.id)ui.showToast('你已冲线！等待其他车手完成比赛');else if(!['countdown','go','drift','finish','results'].includes(e.type))ui.showToast(e.text);}

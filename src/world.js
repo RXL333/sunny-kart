@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { optimizeModel } from './optimize-model.js';
 import { createTerrainSampler, MAP_LAYOUT } from './game/map-layout.js';
+import { viewportProfile, cameraFov, chaseFraming, chaseEye } from './viewport.js';
 
 const PALETTE = [0xf59e42, 0x41bfa2, 0x9982df, 0xf4ce51, 0xef718c, 0x54b4df, 0xdba16b, 0x7bbd66];
 const mat = (color, roughness = .72) => new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
@@ -24,10 +25,9 @@ function label(text, bg='#fff8dc', fg='#143e49', width=512, height=128) {
 
 export class World {
   constructor(canvas,track) {
-    this.track=track; this.time=0; this.overview=false; this.karts=[]; this.windmills=[]; this.clouds=[]; this.particles=[];
+    this.track=track; this.time=0; this.overview=false; this.karts=[]; this.windmills=[]; this.clouds=[]; this.particles=[];this.graphicsQuality='auto';
     this.terrainSampler=createTerrainSampler(track);
     this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
     this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.18;
@@ -41,9 +41,24 @@ export class World {
     sun.shadow.normalBias=.055;sun.shadow.bias=-.0002;this.scene.add(sun);this.scene.add(sun.target);this.sun=sun;
     this.materials={grass:mat(0x83c56b),road:mat(0x627178),white:mat(0xfff7dd),red:mat(0xf28364),sand:mat(0xf1dfaa),dark:mat(0x203e49),trunk:mat(0x9f7760),leaf:mat(0x52aa64),leaf2:mat(0x91ca69),yellow:mat(0xffdf69),teal:mat(0x46bba9)};
     this.buildIsland();this.buildRoad();this.buildBridge();this.buildScenery();this.buildStart();this.buildPickups();
-    this.resize();const start=this.track.sample(0);this.camera.position.set(start.x+start.tx*8.5+start.nx*8,start.y+5.4,start.z+start.tz*8.5+start.nz*8);this.camera.lookAt(start.x,start.y+1.2,start.z);window.addEventListener('resize',()=>this.resize());
+    this.resize();const start=this.track.sample(0);this.camera.position.set(start.x+start.tx*8.5+start.nx*8,start.y+5.4,start.z+start.tz*8.5+start.nz*8);this.camera.lookAt(start.x,start.y+1.2,start.z);
+    this.queueResize=()=>{if(this.resizeRequest)return;this.resizeRequest=requestAnimationFrame(()=>{this.resizeRequest=0;this.resize();});};
+    window.addEventListener('resize',this.queueResize);window.addEventListener('orientationchange',this.queueResize);
+    window.visualViewport?.addEventListener('resize',this.queueResize);
+    document.addEventListener('fullscreenchange',this.queueResize);document.addEventListener('webkitfullscreenchange',this.queueResize);
+    if(typeof ResizeObserver!=='undefined'){this.canvasResize=new ResizeObserver(this.queueResize);this.canvasResize.observe(canvas);}
   }
-  resize(){this.renderer.setSize(innerWidth,innerHeight);this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();}
+  resize(){
+    const profile=viewportProfile({rect:this.renderer.domElement.getBoundingClientRect(),visualViewport:window.visualViewport||{},width:innerWidth,height:innerHeight,pixelRatio:window.devicePixelRatio||1,touch:Boolean(window.matchMedia?.('(any-pointer: coarse)').matches||navigator.maxTouchPoints>0),quality:this.graphicsQuality});
+    const previous=this.viewport;
+    if(previous&&previous.width===profile.width&&previous.height===profile.height&&previous.pixelRatio===profile.pixelRatio&&previous.shadowSize===profile.shadowSize)return;
+    if(previous?.pixelRatio!==profile.pixelRatio)this.renderer.setPixelRatio(profile.pixelRatio);
+    if(!previous||previous.width!==profile.width||previous.height!==profile.height)this.renderer.setSize(profile.width,profile.height,false);
+    if(!previous||chaseFraming(previous).relativeToPlayer!==chaseFraming(profile).relativeToPlayer)this.resetChase=true;
+    this.camera.aspect=profile.aspect;this.camera.updateProjectionMatrix();this.viewport=profile;
+    if(this.sun&&this.sun.shadow.mapSize.x!==profile.shadowSize){this.sun.shadow.mapSize.set(profile.shadowSize,profile.shadowSize);this.sun.shadow.map?.dispose();this.sun.shadow.map=null;this.sun.shadow.needsUpdate=true;}
+  }
+  setGraphicsQuality(mode){this.graphicsQuality=['auto','smooth','sharp'].includes(mode)?mode:'auto';this.resize();}
   nearest(x,z){return this.terrainSampler.nearest(x,z);}
   terrainHeight(x,z){return this.terrainSampler.terrainHeight(x,z);}
   buildIsland(){
@@ -189,14 +204,14 @@ export class World {
       this.camera.position.lerp(eye,1-Math.exp(-dt*3));this.camera.lookAt(b.centerX,12,b.centerZ);this.camera.fov=48;
     }else if(menu){const p=this.startSample;const hero=this.karts[0]?.root.position??new THREE.Vector3(p.x,p.y,p.z);const t=this.time*.13;
       const eye=new THREE.Vector3(hero.x+p.tx*8.5+p.nx*(8+Math.sin(t)*.8),hero.y+5.4,hero.z+p.tz*8.5+p.nz*(8+Math.sin(t)*.8));
-      const screenRight=new THREE.Vector3(eye.z-hero.z,0,hero.x-eye.x).normalize();const focus=hero.clone().add(new THREE.Vector3(0,1.2,0)).addScaledVector(screenRight,innerWidth>800?-3.9:0);
-      this.camera.position.lerp(eye,1-Math.exp(-dt*3));this.camera.lookAt(focus);this.camera.fov=48;
-    }else{const r=race.player,p=this.track.sample(r.distance),behind=this.track.sample(r.distance-11.5-Math.min(1.5,r.speed*.025)),ahead=this.track.sample(r.distance+14);const back=new THREE.Vector3(behind.x+behind.nx*r.offset,behind.y+5.8,behind.z+behind.nz*r.offset);
-      this.camera.position.lerp(back,1-Math.exp(-dt*6));this.camera.lookAt(ahead.x+ahead.nx*r.offset*.65,ahead.y+1.7,ahead.z+ahead.nz*r.offset*.65);this.camera.fov=THREE.MathUtils.damp(this.camera.fov,53+(r.speed??0)*.17,4,dt);
+      const screenRight=new THREE.Vector3(eye.z-hero.z,0,hero.x-eye.x).normalize();const focus=hero.clone().add(new THREE.Vector3(0,1.2,0)).addScaledVector(screenRight,this.camera.aspect>1.3?-3.9:0);
+      this.camera.position.lerp(eye,1-Math.exp(-dt*3));this.camera.lookAt(focus);this.camera.fov=cameraFov(48,this.camera.aspect);
+    }else{const r=race.player,framing=chaseFraming(this.viewport,r.speed),ahead=this.track.sample(r.distance+framing.ahead),eye=chaseEye(this.track,r.distance,r.offset,framing),back=new THREE.Vector3(eye.x,eye.y,eye.z),snap=framing.relativeToPlayer&&(this.wasMenu||this.resetChase);
+      if(snap)this.camera.position.copy(back);else this.camera.position.lerp(back,1-Math.exp(-dt*6));this.camera.lookAt(ahead.x+ahead.nx*r.offset*.65,ahead.y+framing.targetHeight,ahead.z+ahead.nz*r.offset*.65);const targetFov=cameraFov(53+(r.speed??0)*.17,this.camera.aspect);this.camera.fov=snap?targetFov:THREE.MathUtils.damp(this.camera.fov,targetFov,4,dt);this.resetChase=false;
     }
     const focus=menu?this.karts[0]?.root.position:this.karts[race.racers.indexOf(race.player)]?.root.position;
     if(focus){this.sun.target.position.copy(focus);this.sun.position.set(focus.x-80,focus.y+145,focus.z-65);this.sun.target.updateMatrixWorld();}
-    this.camera.updateProjectionMatrix();this.renderer.render(this.scene,this.camera);
+    this.wasMenu=menu;this.camera.updateProjectionMatrix();this.renderer.render(this.scene,this.camera);
   }
   spark(position,color,p,drift){if(this.particles.length>100)return;const m=mesh(new THREE.SphereGeometry(.16,5,4),new THREE.MeshBasicMaterial({color}),position.x-p.tx*1.3,position.y+.35,position.z-p.tz*1.3,this.scene);m.castShadow=false;this.particles.push({mesh:m,life:.35+Math.random()*.25,velocity:new THREE.Vector3((Math.random()-.5)*3-p.tx*3,Math.random()*2,-p.tz*3+(Math.random()-.5)*3)});}
 }

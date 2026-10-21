@@ -1,13 +1,15 @@
 // Small original synthesised score and engine, no downloaded audio or audio trackers.
 import { CollisionLimiter } from './sound-profile.js';
 export class AudioEngine {
-  constructor(){this.muted=false;this.ctx=null;this.nextNote=0;this.noteIndex=0;this.collisions=new CollisionLimiter();}
+  constructor(){this.muted=false;this.volume=1;this.ctx=null;this.nextNote=0;this.noteIndex=0;this.collisions=new CollisionLimiter();}
   unlock(){
-    if(!this.ctx){const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;this.ctx=new Ctx();this.master=this.ctx.createGain();this.master.gain.value=.2;const limiter=this.ctx.createDynamicsCompressor();limiter.threshold.value=-18;limiter.knee.value=18;limiter.ratio.value=4;limiter.attack.value=.005;limiter.release.value=.12;this.master.connect(limiter).connect(this.ctx.destination);
+    if(!this.ctx){const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;this.ctx=new Ctx();this.master=this.ctx.createGain();this.master.gain.value=this.muted?0:.2*this.volume;const limiter=this.ctx.createDynamicsCompressor();limiter.threshold.value=-18;limiter.knee.value=18;limiter.ratio.value=4;limiter.attack.value=.005;limiter.release.value=.12;this.master.connect(limiter).connect(this.ctx.destination);
       this.engine=this.ctx.createOscillator();this.engine.type='triangle';this.engineGain=this.ctx.createGain();this.engineGain.gain.value=0;this.engine.connect(this.engineGain).connect(this.master);this.engine.start();}
     this.ctx.resume();
   }
-  setMuted(value){this.muted=value;if(this.master)this.master.gain.setTargetAtTime(value?0:.2,this.ctx.currentTime,.05);}
+  setMuted(value){this.muted=value;this.applyVolume();}
+  setVolume(value){this.volume=Math.max(0,Math.min(1,Number(value)||0));this.applyVolume();}
+  applyVolume(){if(this.master)this.master.gain.setTargetAtTime(this.muted?0:.2*this.volume,this.ctx.currentTime,.05);}
   tone(frequency,duration=.12,type='sine',volume=.2,slide){if(!this.ctx||this.muted)return;const t=this.ctx.currentTime,o=this.ctx.createOscillator(),g=this.ctx.createGain();o.type=type;o.frequency.setValueAtTime(frequency,t);if(slide)o.frequency.exponentialRampToValueAtTime(slide,t+duration);g.gain.setValueAtTime(volume,t);g.gain.exponentialRampToValueAtTime(.001,t+duration);o.connect(g).connect(this.master);o.start(t);o.stop(t+duration);}
   collision(impact){
     if(!this.ctx||this.muted)return;

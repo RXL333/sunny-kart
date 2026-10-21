@@ -29,3 +29,12 @@ test('opposite steering cancels, throttle and brake remain independent, and comb
   const input=drivingInput(new Set(['KeyS','Space','ShiftLeft']),{},true);
   assert.equal(input.throttle,1);assert.equal(input.brake,1);assert.equal(input.nitro,true);assert.equal(input.drift,true);
 });
+
+test('custom sensitivity softens either control method without reversing it; modals brake instead of continuing automatic throttle',()=>{
+  for(const touch of [false,true]){
+    const keys=new Set(touch?[]:['ArrowLeft']);const state=touch?{steer:-1}:{};
+    const full=drivingInput(keys,state,true),soft=drivingInput(keys,state,true,{sensitivity:.5});
+    assert.equal(soft.steer,full.steer*.5);assert.equal(soft.throttle,1);
+  }
+  assert.deepEqual(drivingInput(new Set(['KeyW','KeyA','Space']),{drift:true},true,{blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false});
+});
