@@ -324,6 +324,7 @@
 }
 @media (orientation: portrait) and (max-width:600px) {
   #app .brand-word { display:none; }
+  #app:not(.in-race) .topbar .network-status { left:var(--safe-left);right:auto;top:calc(var(--safe-top) + 50px);max-width:calc(100vw - var(--safe-left) - var(--safe-right));padding:5px 8px;font-size:8px;line-height:1.25;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
   #app.in-race .brand { display:none; }
   #app.in-race .top-actions { margin-left:auto; }
   #app .race-hud .position-panel { left:calc(var(--safe-left) + 112px);top:calc(var(--safe-top) + 64px);transform:none;max-width:78px; }
