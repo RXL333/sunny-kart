@@ -31,6 +31,10 @@ the held default E key to consume it. They then rebind use-item to F through the
 settings UI, verify E stops working and the hint updates, and check holding F
 does not consume another item acquired before release. Random reward selection
 remains authoritative; this browser flow exercises whichever reward is awarded.
+A held F also survives opening/closing settings: the next OS key-repeat must
+not be mistaken for a new press after logical input is cleared.
+A final quick F press/release also checks that input between render frames is
+retained until the next simulation step.
 Deterministic unit tests cover all five item rules. Competitive mode is checked
 separately for energy availability and absent item boxes/inventory.
 

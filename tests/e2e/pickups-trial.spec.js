@@ -121,9 +121,20 @@ test('physics crossings collect energy, store one manual item, and respect defau
     const thirdHeld = await inventory(page);
     await simulationAdvances(page);
     expect(await inventory(page)).toBe(thirdHeld);
+    // Settings clears logical keys while F is still physically held. A
+    // subsequent OS auto-repeat must not become a new item press after close.
+    await page.locator('.settings-button').click();
+    await page.locator('.settings-done').click();
+    await simulationAdvances(page, .05);
+    await page.keyboard.down('KeyF'); // already held: native repeat=true
+    await simulationAdvances(page);
+    expect(await inventory(page)).toBe(thirdHeld);
   } finally { await page.keyboard.up('KeyF'); }
   await simulationAdvances(page, .05);
-  await useKeyboardItem(page, 'KeyF');
+  // A press/release entirely between render frames must survive until the
+  // next simulation step, just like a quick real keyboard tap.
+  await page.keyboard.press('KeyF');
+  await expect.poll(() => inventory(page)).toBe(null);
   expect(errors).toEqual([]);
 });
 

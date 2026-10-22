@@ -41,7 +41,7 @@ const clearKeys=()=>{keys.clear();pendingItemPress=false;ui.clearTouch();};
 function pause(){if(!['racing','countdown'].includes(race.phase))return;if(online){ui.showToast('联机比赛持续进行，退出可返回大厅');return;}race.pause();ui.setPaused(true);clearKeys();}
 function resume(){race.resume();ui.setPaused(false);audio.unlock();}
 function resetTrial(){recorder=null;ghostRecording=null;trialMeta=null;trialUI?.reset();world?.updateGhost(null);pickupFeedback?.reset();}
-function mainMenu(){network.leave();online=false;rotationPaused=false;ui.setOnline(false);clearKeys();resetTrial();selection.mode=modePicker.mode;race=new Race(track,selection);showedResults=false;ui.showMenu();world?.setLineup?.(race.racers);}
+function mainMenu(){network.leave();online=false;rotationPaused=false;ui.setOnline(false);clearKeys();resetTrial();selection.mode=modePicker.mode;ui.raceMode=selection.mode;race=new Race(track,selection);showedResults=false;ui.showMenu();world?.setLineup?.(race.racers);}
 function start(options=selection){if(worldLoading)return;network.leave();online=false;rotationPaused=false;ui.setOnline(false);resetTrial();selection={...selection,...options};race=new Race(track,selection);race.start();showedResults=false;ui.setPaused(false);ui.enterRace?.();clearKeys();audio.unlock();world?.setLineup?.(race.racers);if(selection.mode==='time-trial')beginTrial();}
 const ui=new UI({
   onStart:options=>start({...options,mode:modePicker.mode}),onPause:pause,onResume:resume,
@@ -80,7 +80,7 @@ ui.root.addEventListener('inputmodechange',()=>{clearKeys();settings.setInputMod
 applySettings(settings.values);
 const network=new Network({
   status:state=>ui.setNetwork(state),
-  room:room=>{if(room.status==='lobby'){selection.mode=room.mode||'race';modePicker.setMode(selection.mode);selectCourse(room.trackId||DEFAULT_TRACK_ID,false);ui.showLobby(room);}},
+  room:room=>{if(room.status==='lobby'){selection.mode=room.mode||'race';ui.raceMode=selection.mode;modePicker.setMode(selection.mode);selectCourse(room.trackId||DEFAULT_TRACK_ID,false);ui.showLobby(room);}},
   started:(state,id)=>{resetTrial();selectCourse(state.trackId||network.room?.trackId||DEFAULT_TRACK_ID,false);online=true;showedResults=false;race=new Race(track,{...selection,mode:state.mode||network.room?.mode||'race',multiplayer:true,localPlayerId:id});race.applySnapshot(state,id);selection={character:race.player.character,difficulty:network.room?.difficulty??selection.difficulty,trackId:track.id,mode:race.mode};modePicker.setMode(race.mode);clearKeys();ui.setPaused(false);ui.enterRace?.();ui.setOnline(true);world?.setLineup?.(race.racers);},
   snapshot:(state,tick,meta={})=>{if(!online)return;race.applySnapshot(state,network.id);
     if(race.phase==='racing'&&!race.player.finished)for(const command of network.pendingInputs(meta.ack,meta.receivedAt))predictPlayer(command.duration,command.input);
@@ -138,6 +138,8 @@ window.addEventListener('keydown',event=>{
   if(event.target?.closest?.('input,textarea,select,[contenteditable="true"],.courses-overlay,.help-overlay,.lobby-overlay'))return;
   const action=actionForKey(settings.bindings,event.code);if(!action)return;
   if(race.phase!=='menu')event.preventDefault();
+  // A held key must be released after a modal/reconnect clears its state.
+  if(action==='useItem'&&event.repeat)return;
   if(!event.repeat&&action==='pause'){if(race.phase==='paused')resume();else if(['racing','countdown'].includes(race.phase))pause();}
   if(!event.repeat&&action==='restart'&&!online&&race.phase!=='menu')start(selection);
   if(!event.repeat&&action==='autoThrottle')ui.setAutoThrottle?.(!ui.autoThrottle);
