@@ -1,9 +1,11 @@
-export const CONTROL_LAYOUT_STORAGE_KEY = 'sunny-touch-layout-v1';
-export const CONTROL_ACTIONS = Object.freeze(['left', 'right', 'drift', 'nitro', 'brake', 'throttle']);
-const labels = { left: '◀ 左转', right: '右转 ▶', drift: '漂移', nitro: '⚡ 氮气', brake: '刹车', throttle: '油门' };
+export const CONTROL_LAYOUT_STORAGE_KEY = 'sunny-touch-layout-v2';
+export const LEGACY_CONTROL_LAYOUT_STORAGE_KEY = 'sunny-touch-layout-v1';
+export const CONTROL_ACTIONS = Object.freeze(['left', 'right', 'drift', 'nitro', 'brake', 'throttle', 'useItem']);
+const legacyActions = CONTROL_ACTIONS.filter(action => action !== 'useItem');
+const labels = { left: '◀ 左转', right: '右转 ▶', drift: '漂移', nitro: '⚡ 氮气', brake: '刹车', throttle: '油门', useItem: '使用道具' };
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
-const emptyLayouts = () => ({ version: 1, landscape: null, portrait: null });
+const emptyLayouts = () => ({ version: 2, landscape: null, portrait: null });
 export const layoutOrientation = (width, height) => width > height ? 'landscape' : 'portrait';
 
 /** Positions are viewport-relative centres, never raw CSS or arbitrary storage keys. */
@@ -14,23 +16,39 @@ export function validateControlLayouts(value) {
     const source = Object.hasOwn(value, orientation) && value[orientation];
     if (!record(source)) continue;
     const positions = {};
-    for (const action of CONTROL_ACTIONS) {
+    for (const action of legacyActions) {
       const point = Object.hasOwn(source, action) && source[action];
       if (!record(point) || typeof point.x !== 'number' || typeof point.y !== 'number' || !Number.isFinite(point.x) || !Number.isFinite(point.y)) break;
       positions[action] = { x: clamp(point.x, 0, 1), y: clamp(point.y, 0, 1) };
     }
-    if (Object.keys(positions).length === CONTROL_ACTIONS.length) result[orientation] = positions;
+    if (Object.keys(positions).length !== legacyActions.length) continue;
+    // Old six-button layouts remain complete. Add the new button only after
+    // viewport bounds are known, without changing any of the saved six points.
+    if (Object.hasOwn(source, 'useItem')) {
+      const point = source.useItem;
+      if (record(point) && typeof point.x === 'number' && typeof point.y === 'number' && Number.isFinite(point.x) && Number.isFinite(point.y))
+        positions.useItem = { x: clamp(point.x, 0, 1), y: clamp(point.y, 0, 1) };
+    }
+    result[orientation] = positions;
   }
   return result;
 }
 
 export function readControlLayouts(storage) {
-  try { return validateControlLayouts(JSON.parse(storage?.getItem(CONTROL_LAYOUT_STORAGE_KEY) || 'null')); }
+  try {
+    const saved = storage?.getItem(CONTROL_LAYOUT_STORAGE_KEY);
+    // In particular, a deliberately empty v2 layout must not revive v1 data.
+    if (saved !== null && saved !== undefined) return validateControlLayouts(JSON.parse(saved));
+    return validateControlLayouts(JSON.parse(storage?.getItem(LEGACY_CONTROL_LAYOUT_STORAGE_KEY) || 'null'));
+  }
   catch { return emptyLayouts(); }
 }
 
 export function saveControlLayouts(storage, layouts) {
-  try { storage?.setItem(CONTROL_LAYOUT_STORAGE_KEY, JSON.stringify(validateControlLayouts(layouts)));return Boolean(storage); }
+  try {
+    if (typeof storage?.setItem !== 'function') return false;
+    storage.setItem(CONTROL_LAYOUT_STORAGE_KEY, JSON.stringify(validateControlLayouts(layouts)));return true;
+  }
   catch { return false; }
 }
 
@@ -47,6 +65,28 @@ export function controlGeometry({ width, height, size = 64, safe = {}, toolbar =
   return { width, height, size, minX, maxX, minY, maxY };
 }
 
+// Rectangle boundaries enumerate every possible free region, so this search
+// finds a gap without a per-pixel scan or moving the six established controls.
+function availableItemPosition(preferred, positions, size, itemSize, bounds) {
+  const others = legacyActions.map(action => positions[action]);
+  const distance = (size + itemSize) / 2 + 3;
+  const xs = new Set([bounds.minX, bounds.maxX, clamp(preferred.x, bounds.minX, bounds.maxX)]);
+  const ys = new Set([bounds.minY, bounds.maxY, clamp(preferred.y, bounds.minY, bounds.maxY)]);
+  for (const point of others) {
+    for (const sign of [-1, 1]) {
+      xs.add(clamp(point.x + sign * distance, bounds.minX, bounds.maxX));
+      ys.add(clamp(point.y + sign * distance, bounds.minY, bounds.maxY));
+    }
+  }
+  let best = null, bestDistance = Infinity;
+  for (const x of xs) for (const y of ys) {
+    if (others.some(point => Math.abs(point.x - x) < distance - 1e-7 && Math.abs(point.y - y) < distance - 1e-7)) continue;
+    const score = (x - preferred.x) ** 2 + (y - preferred.y) ** 2;
+    if (score < bestDistance) { best = { x, y };bestDistance = score; }
+  }
+  return best;
+}
+
 export function resolveControlPositions(layout, viewport, { handedness = 'standard', bottom = 18 } = {}) {
   const geometry = controlGeometry(viewport), { width, height, size, minX, maxX, minY, maxY } = geometry;
   const step = size + 10, y = clamp(maxY - Math.max(0, bottom - Math.max(12, Number(viewport.safe?.bottom) || 0)), Math.min(maxY, minY + step), maxY);
@@ -56,6 +96,7 @@ export function resolveControlPositions(layout, viewport, { handedness = 'standa
     left: { x: steering, y }, right: { x: steering + step, y },
     drift: { x: actions, y: y - step }, nitro: { x: actions + step, y: y - step },
     brake: { x: actions, y }, throttle: { x: actions + step, y },
+    useItem: { x: steering + step / 2, y: y - step },
   };
   const positions = {};
   for (const action of CONTROL_ACTIONS) {
@@ -64,6 +105,13 @@ export function resolveControlPositions(layout, viewport, { handedness = 'standa
       x: clamp(point ? point.x * width : defaults[action].x, minX, maxX),
       y: clamp(point ? point.y * height : defaults[action].y, minY, maxY),
     };
+  }
+  geometry.itemSize = size;
+  if (layout) {
+    for (const itemSize of [...new Set([size, Math.min(size, 44), Math.min(size, 24)])]) {
+      const point = availableItemPosition(positions.useItem, positions, size, itemSize, geometry);
+      if (point) { positions.useItem = point;geometry.itemSize = itemSize;break; }
+    }
   }
   return { positions, geometry };
 }
@@ -75,10 +123,12 @@ export function normalizeControlPositions(positions, { width, height }) {
   }]));
 }
 
-export function overlappingControls(positions, size) {
+export function overlappingControls(positions, size, itemSize = size) {
   for (let i = 0; i < CONTROL_ACTIONS.length; i++) for (let j = i + 1; j < CONTROL_ACTIONS.length; j++) {
     const a = positions[CONTROL_ACTIONS[i]], b = positions[CONTROL_ACTIONS[j]];
-    if (Math.abs(a.x - b.x) < size + 3 && Math.abs(a.y - b.y) < size + 3) return true;
+    if (!a || !b) continue;
+    const clearance = ((CONTROL_ACTIONS[i] === 'useItem' ? itemSize : size) + (CONTROL_ACTIONS[j] === 'useItem' ? itemSize : size)) / 2 + 3;
+    if (Math.abs(a.x - b.x) < clearance - 1e-7 && Math.abs(a.y - b.y) < clearance - 1e-7) return true;
   }
   return false;
 }
@@ -94,7 +144,7 @@ export class ControlLayoutEditor {
     editor.setAttribute('role', 'dialog');editor.setAttribute('aria-modal', 'true');editor.setAttribute('aria-labelledby', 'control-editor-title');
     editor.innerHTML = `
       <div class="control-editor-bar">
-        <div><h2 id="control-editor-title">把按键放到顺手的位置</h2><p class="control-editor-description">拖动六个按键 · 横竖屏分别保存 · 方向键可微调</p></div>
+        <div><h2 id="control-editor-title">把按键放到顺手的位置</h2><p class="control-editor-description">拖动七个按键 · 横竖屏分别保存 · 方向键可微调</p></div>
         <div class="control-editor-actions"><button type="button" class="control-editor-reset">恢复预设</button><button type="button" class="control-editor-cancel">取消</button><button type="button" class="control-editor-save">保存布局 ✓</button></div>
       </div>
       <p class="control-editor-status" role="status">拖动按键，避开车头和比赛信息。</p>
@@ -148,10 +198,13 @@ export class ControlLayoutEditor {
     if (!layout) return;
     const { positions, geometry } = this.resolve(layout);
     // A layout saved on a much larger display must never leave two actions on top of each other.
-    if (overlappingControls(positions, geometry.size)) { this.adaptedDefaults = true;this.root.dataset.customControls = 'false';return; }
+    if (overlappingControls(positions, geometry.size, geometry.itemSize)) { this.adaptedDefaults = true;this.root.dataset.customControls = 'false';return; }
     this.root.style.setProperty('--custom-control-size', `${geometry.size}px`);
     for (const button of this.buttons) {
-      const point = positions[button.dataset.touch];button.style.left = `${point.x}px`;button.style.top = `${point.y}px`;
+      const action = button.dataset.touch, point = positions[action];
+      if (!point) continue;
+      button.style.setProperty('--custom-control-size', `${action === 'useItem' ? geometry.itemSize : geometry.size}px`);
+      button.style.left = `${point.x}px`;button.style.top = `${point.y}px`;
     }
   }
 
@@ -176,10 +229,14 @@ export class ControlLayoutEditor {
   renderEditor() {
     const orientation = this.orientation(), { positions, geometry } = this.resolve(this.draft[orientation]);
     this.editor.style.setProperty('--editor-control-size', `${geometry.size}px`);
-    for (const button of this.previews) { const point = positions[button.dataset.layoutAction];button.style.left = `${point.x}px`;button.style.top = `${point.y}px`; }
-    this.saveButton.disabled = overlappingControls(positions, geometry.size);
+    for (const button of this.previews) {
+      const action = button.dataset.layoutAction, point = positions[action];
+      button.style.setProperty('--editor-control-size', `${action === 'useItem' ? geometry.itemSize : geometry.size}px`);
+      button.style.left = `${point.x}px`;button.style.top = `${point.y}px`;
+    }
+    this.saveButton.disabled = overlappingControls(positions, geometry.size, geometry.itemSize);
     this.editor.querySelector('.control-editor-status').textContent = this.saveButton.disabled ? '有按键重叠，请稍微分开后再保存。' : `${orientation === 'landscape' ? '横屏' : '竖屏'}布局 · 拖动按键，避开车头和比赛信息。`;
-    this.editor.querySelector('.control-editor-description').textContent = `拖动六个按键 · 横竖屏分别保存 · ${this.settings.controlLayout === 'left-handed' ? '右手转向预设' : '左手转向预设'}`;
+    this.editor.querySelector('.control-editor-description').textContent = `拖动七个按键 · 横竖屏分别保存 · ${this.settings.controlLayout === 'left-handed' ? '右手转向预设' : '左手转向预设'}`;
   }
 
   updatePosition(action, x, y) {

@@ -23,7 +23,7 @@ class Target {
 }
 
 function setup(t) {
-  const buttons = Object.fromEntries(['left', 'right', 'throttle', 'brake', 'drift', 'nitro'].map(action => [action, new Target(action)]));
+  const buttons = Object.fromEntries(['left', 'right', 'throttle', 'brake', 'drift', 'nitro', 'useItem'].map(action => [action, new Target(action)]));
   const win = new Target(), doc = new Target(), state = {};
   let hit = null;doc.elementFromPoint = () => hit;
   const controls = new TouchControls(Object.values(buttons), { state, windowTarget: win, documentTarget: doc });
@@ -31,15 +31,16 @@ function setup(t) {
   return { buttons, win, doc, state, controls, setHit: value => { hit = value; } };
 }
 
-test('simultaneous throttle, steering, drift and nitro remain independent and map to the corrected direction', t => {
+test('simultaneous throttle, steering, drift, nitro and item use remain independent and map to the corrected direction', t => {
   const { buttons: b, state } = setup(t);
-  for (const [id, action] of ['throttle', 'left', 'drift', 'nitro'].entries()) assert.ok(b[action].emit('pointerdown', id).prevented);
-  assert.deepEqual(state, { throttle: 1, brake: 0, steer: -1, drift: true, nitro: true });
+  for (const [id, action] of ['throttle', 'left', 'drift', 'nitro', 'useItem'].entries()) assert.ok(b[action].emit('pointerdown', id).prevented);
+  assert.deepEqual(state, { throttle: 1, brake: 0, steer: -1, drift: true, nitro: true, useItem: true });
   assert.equal(drivingInput(new Set(), state).steer, 1, 'human left stays correct in game coordinates');
   b.left.emit('pointerup', 1);
-  assert.deepEqual(state, { throttle: 1, brake: 0, steer: 0, drift: true, nitro: true });
+  assert.deepEqual(state, { throttle: 1, brake: 0, steer: 0, drift: true, nitro: true, useItem: true });
   b.nitro.emit('pointercancel', 3);
-  assert.equal(state.nitro, false);assert.equal(state.throttle, 1);assert.equal(state.drift, true);
+  assert.equal(state.nitro, false);assert.equal(state.throttle, 1);assert.equal(state.drift, true);assert.equal(state.useItem,true);
+  b.useItem.emit('pointerup', 4);assert.equal(state.useItem,false);assert.equal(state.drift,true);
 });
 
 test('two fingers on one action and opposite directions cannot release each other', t => {
@@ -65,12 +66,22 @@ test('a captured thumb slides between directions and neutral space without affec
 
 test('blur, viewport rotation, hidden pages and explicit clear release every action and visual state', t => {
   const { buttons: b, state, controls, win, doc } = setup(t);
-  const neutral = { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false };
+  const neutral = { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false, useItem: false };
   for (const clear of [() => win.emit('blur'), () => win.emit('resize'), () => win.emit('orientationchange'), () => win.emit('pagehide'), () => { doc.hidden = true;doc.emit('visibilitychange'); }, () => controls.clear()]) {
-    b.throttle.emit('pointerdown', 1);b.right.emit('pointerdown', 2);b.brake.emit('pointerdown', 3);b.drift.emit('pointerdown', 4);
+    b.throttle.emit('pointerdown', 1);b.right.emit('pointerdown', 2);b.brake.emit('pointerdown', 3);b.drift.emit('pointerdown', 4);b.nitro.emit('pointerdown',5);b.useItem.emit('pointerdown',6);
     clear();assert.deepEqual(state, neutral);assert.equal(controls.pointers.size, 0);
     for (const button of Object.values(b)) { assert.equal(button.attrs['aria-pressed'], 'false');assert.equal(button.classes.has('pressed'), false);assert.equal(button.captures.size, 0); }
   }
+});
+
+test('two fingers holding the item button and steering sliding over it retain separate ownership', t => {
+  const {buttons:b,state,setHit}=setup(t);
+  b.useItem.emit('pointerdown',1);b.useItem.emit('pointerdown',2);b.left.emit('pointerdown',3);
+  b.useItem.emit('pointerup',1);assert.equal(state.useItem,true);
+  setHit(b.useItem);b.left.emit('pointermove',3);assert.equal(state.steer,0);assert.equal(state.useItem,true);
+  b.useItem.emit('pointercancel',2);assert.equal(state.useItem,false);
+  b.left.emit('pointermove',3);assert.equal(state.useItem,false,'sliding steering never synthesizes an item press');
+  assert.equal(state.nitro,false);
 });
 
 test('window release covers unavailable pointer capture; right mouse clicks and destroyed bindings do nothing', t => {

@@ -44,7 +44,7 @@ export function resolveRailCollision(racer, track, dt = PHYSICS.fixedStep) {
   if (outward <= 0) return 0;
   racer.lateralVelocity = -side * outward * PHYSICS.restitution;
   // Sliding into a rail dissipates forward momentum without a violent spin.
-  racer.speed = Math.max(0, racer.speed - Math.min(racer.speed * 0.22, outward * 0.36));
+  racer.speed = Math.max(0, racer.speed - Math.min(racer.speed * 0.22, outward * 0.36) * (racer.shield > 0 ? .15 : 1));
   racer.yaw = damp(racer.yaw || 0, 0, 5, dt);
   racer.yawRate = (racer.yawRate || 0) * 0.65;
   return outward;

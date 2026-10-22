@@ -2,7 +2,7 @@ import { DEFAULT_KEY_BINDINGS, isActionPressed } from './keyboard-bindings.js';
 
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 export function drivingInput(keys,touch={},autoThrottle=false,{sensitivity=1,blocked=false,bindings=DEFAULT_KEY_BINDINGS}={}) {
-  if(blocked)return {throttle:0,brake:1,steer:0,drift:false,nitro:false};
+  if(blocked)return {throttle:0,brake:1,steer:0,drift:false,nitro:false,useItem:false};
   const pressed=action=>isActionPressed(keys,bindings,action);
   const left=pressed('left'),right=pressed('right');
   // Karts face +Z and the chase camera looks forward from -Z. Positive world
@@ -15,5 +15,6 @@ export function drivingInput(keys,touch={},autoThrottle=false,{sensitivity=1,blo
     steer,
     drift:pressed('drift')||Boolean(touch.drift),
     nitro:pressed('nitro')||Boolean(touch.nitro),
+    useItem:pressed('useItem')||Boolean(touch.useItem),
   };
 }

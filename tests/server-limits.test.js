@@ -9,11 +9,11 @@ test('public backend limits clients and rooms, throttles creation and reclaims i
   t.after(()=>child.kill());
   const port=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Server startup timeout')),4000);child.once('error',reject);child.stdout.on('data',bytes=>{const match=String(bytes).match(/0\.0\.0\.0:(\d+)/);if(match){clearTimeout(timer);resolve(Number(match[1]));}});});
   function peer(autoPong=true){
-    const ws=new WebSocket(`ws://127.0.0.1:${port}/ws`,{autoPong}),messages=[],waiters=[];
+    const ws=new WebSocket(`ws://127.0.0.1:${port}/ws?protocolVersion=4`,{autoPong}),messages=[],waiters=[];
     t.after(()=>ws.terminate());
     ws.on('message',bytes=>{const message=JSON.parse(bytes),waiter=waiters.find(w=>w.predicate(message));if(waiter){waiters.splice(waiters.indexOf(waiter),1);clearTimeout(waiter.timer);waiter.resolve(message);}else messages.push(message);});
     const wait=predicate=>{const i=messages.findIndex(predicate);if(i>=0)return Promise.resolve(messages.splice(i,1)[0]);return new Promise((resolve,reject)=>{const waiter={predicate,resolve,timer:setTimeout(()=>reject(new Error('Expected message missing')),4000)};waiters.push(waiter);});};
-    return {ws,wait,send:message=>ws.send(JSON.stringify(message))};
+    return {ws,wait,send:message=>ws.send(JSON.stringify({protocolVersion:4,...message}))};
   }
   const a=peer(),b=peer(),zombie=peer(false);
   await Promise.all([a,b,zombie].map(p=>p.wait(m=>m.type==='welcome')));

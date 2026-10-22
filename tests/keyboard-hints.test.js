@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { UI } from '../src/ui.js';
-import { DEFAULT_KEY_BINDINGS, assignKeyBinding } from '../src/keyboard-bindings.js';
+import { KEYBOARD_ACTIONS, DEFAULT_KEY_BINDINGS, assignKeyBinding } from '../src/keyboard-bindings.js';
 
 function fixture(t){
   const window=new Window({url:'http://localhost/'});window.document.body.innerHTML='<div id="app"></div>';
@@ -19,9 +19,10 @@ function fixture(t){
 test('desktop defaults clearly name acceleration, braking and every driving action',t=>{
   const ui=fixture(t);
   for(const selector of ['.keyboard-guide','.race-hint']){
-    const guide=ui.el(selector);assert.equal(guide.querySelectorAll('[data-action-hint]').length,9);
-    for(const action of ['throttle','brake','left','right','drift','nitro','autoThrottle','pause','restart'])assert.ok(guide.querySelector(`[data-action-hint="${action}"] kbd`));
+    const guide=ui.el(selector);assert.equal(guide.querySelectorAll('[data-action-hint]').length,KEYBOARD_ACTIONS.length);
+    for(const {id:action} of KEYBOARD_ACTIONS)assert.ok(guide.querySelector(`[data-action-hint="${action}"] kbd`));
     assert.match(guide.querySelector('[data-action-hint="brake"]').textContent,/S.*↓.*刹车/);
+    assert.match(guide.querySelector('[data-action-hint="useItem"]').textContent,/E.*使用道具/);
   }
   assert.equal(ui.root.dataset.inputMode,'keyboard');
 });
@@ -29,10 +30,11 @@ test('desktop defaults clearly name acceleration, braking and every driving acti
 test('changing a keyboard binding immediately updates every desktop hint while keeping the mobile help intact',t=>{
   const ui=fixture(t),mobileHelp=ui.el('.touch-help-list').innerHTML;
   let bindings=DEFAULT_KEY_BINDINGS;
-  for(const [action,code] of [['throttle','KeyI'],['brake','KeyK'],['drift','KeyU'],['nitro','KeyO'],['autoThrottle','KeyT'],['pause','KeyP'],['restart','KeyB']])bindings=assignKeyBinding(bindings,action,0,code).bindings;
+  for(const [action,code] of [['throttle','KeyI'],['brake','KeyK'],['drift','KeyU'],['nitro','KeyO'],['useItem','KeyF'],['autoThrottle','KeyT'],['pause','KeyP'],['restart','KeyB']])bindings=assignKeyBinding(bindings,action,0,code).bindings;
   ui.setKeyBindings(bindings);
   assert.match(ui.el('.keyboard-guide [data-action-hint="throttle"]').textContent,/I/);
   assert.match(ui.el('.race-hint [data-action-hint="brake"]').textContent,/K/);
+  assert.match(ui.el('.race-hint [data-action-hint="useItem"]').textContent,/F.*使用道具/);
   assert.match(ui.el('.nitro-panel small').textContent,/O/);
   assert.match(ui.el('.drift-heading > span:last-child').textContent,/U/);
   assert.equal(ui.el('.auto-throttle-button kbd').textContent,'T');

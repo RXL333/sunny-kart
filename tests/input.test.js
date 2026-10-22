@@ -37,7 +37,7 @@ test('custom sensitivity softens either control method without reversing it; mod
     const full=drivingInput(keys,state,true),soft=drivingInput(keys,state,true,{sensitivity:.5});
     assert.equal(soft.steer,full.steer*.5);assert.equal(soft.throttle,1);
   }
-  assert.deepEqual(drivingInput(new Set(['KeyW','KeyA','Space']),{drift:true},true,{blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false});
+  assert.deepEqual(drivingInput(new Set(['KeyW','KeyA','Space','KeyE']),{drift:true,useItem:true},true,{blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false,useItem:false});
 });
 
 test('custom keyboard mappings drive the same physics inputs and replacing both keys retires the defaults',()=>{
@@ -46,9 +46,20 @@ test('custom keyboard mappings drive the same physics inputs and replacing both 
   for(const [action,codes] of Object.entries(custom))for(const [slot,code] of codes.entries()){
     const result=assignKeyBinding(bindings,action,slot,code);assert.equal(result.error,null);bindings=result.bindings;
   }
-  assert.deepEqual(drivingInput(new Set(['KeyI','KeyK','KeyJ','KeyU','KeyO']),{},false,{bindings}),{throttle:1,brake:1,steer:1,drift:true,nitro:true});
+  assert.deepEqual(drivingInput(new Set(['KeyI','KeyK','KeyJ','KeyU','KeyO']),{},false,{bindings}),{throttle:1,brake:1,steer:1,drift:true,nitro:true,useItem:false});
   assert.equal(drivingInput(new Set(['KeyL']),{},false,{bindings}).steer,-1);
-  assert.deepEqual(drivingInput(new Set(['KeyW','ArrowUp','KeyS','ArrowDown','KeyA','ArrowLeft','KeyD','ArrowRight','ShiftLeft','Space']),{},false,{bindings}),{throttle:0,brake:0,steer:0,drift:false,nitro:false});
+  assert.deepEqual(drivingInput(new Set(['KeyW','ArrowUp','KeyS','ArrowDown','KeyA','ArrowLeft','ArrowRight','KeyD','ShiftLeft','Space']),{},false,{bindings}),{throttle:0,brake:0,steer:0,drift:false,nitro:false,useItem:false});
   assert.equal(drivingInput(new Set(['Numpad8']),{brake:1,steer:-1},false,{bindings}).throttle,1);
-  assert.deepEqual(drivingInput(new Set(['KeyI']),{},true,{bindings,blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false});
+  assert.deepEqual(drivingInput(new Set(['KeyI']),{},true,{bindings,blocked:true}),{throttle:0,brake:1,steer:0,drift:false,nitro:false,useItem:false});
+});
+
+test('item input has its own remappable keyboard and touch action, independent from nitro',()=>{
+  for(const input of [drivingInput(new Set(['KeyE'])),drivingInput(new Set(),{useItem:true})]) {
+    assert.equal(input.useItem,true);assert.equal(input.nitro,false);
+  }
+  assert.equal(drivingInput(new Set(['Space'])).useItem,false);
+  const {bindings,error}=assignKeyBinding(DEFAULT_KEY_BINDINGS,'useItem',0,'KeyF');assert.equal(error,null);
+  assert.equal(drivingInput(new Set(['KeyE']),{},false,{bindings}).useItem,false);
+  const combined=drivingInput(new Set(['KeyF','Space','KeyW']),{},false,{bindings});
+  assert.equal(combined.useItem,true);assert.equal(combined.nitro,true);assert.equal(combined.throttle,1);
 });

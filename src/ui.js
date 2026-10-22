@@ -22,7 +22,7 @@ export class UI {
     this.phase = 'menu';
     this.autoThrottle = false;
     this.autoThrottleChosen=false;
-    this.touchState = { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false };
+    this.touchState = { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false, useItem: false };
     this.root = document.querySelector('#app');
     this.root.innerHTML = `
       <header class="topbar">
@@ -55,6 +55,7 @@ export class UI {
       <section class="overlay lobby-overlay" hidden><div class="dialog lobby-dialog" role="dialog" aria-modal="true" aria-labelledby="lobby-title"><button class="close-button close-lobby" aria-label="关闭联机面板">×</button><span class="dialog-eyebrow">GOOD COMPANY, GREAT RACE</span><h2 id="lobby-title">好朋友，一起追风。</h2><p class="lobby-description">创建一个小房间，分享房间号就能一起出发。</p><div class="room-entry"><button class="primary-button create-room-button"><span>创建好友房间</span>${arrowIcon}</button><div class="join-divider">或者，加入朋友的房间</div><form class="join-form"><label for="room-code-input" class="sr-only">6 位房间号</label><input id="room-code-input" inputmode="text" maxlength="6" placeholder="输入 6 位房间号" autocomplete="off" spellcheck="false" pattern="[A-Za-z0-9]{6}" required/><button class="join-room-button" type="submit">加入</button></form></div><div class="room-content" hidden><div class="room-code-line"><span>分享房间号</span><strong class="room-code">------</strong><button class="copy-room-button" aria-label="复制房间号" title="复制房间号">复制</button></div><div class="lobby-players"></div><p class="room-tip">最多 8 位好友，其余车位由 AI 车手补齐。</p><button class="primary-button start-room-button"><span>全员上车，出发！</span>${arrowIcon}</button><p class="waiting-host" hidden>等待房主开始比赛…</p><button class="plain-button leave-room-button">退出房间</button></div><div class="lobby-status" role="status">连接后就可以一起出发</div></div></section>
       <div class="touch-controls" hidden><div class="touch-steering"><button data-touch="left" aria-label="向左转向">◀</button><button data-touch="right" aria-label="向右转向">▶</button></div><div class="touch-driving"><button data-touch="drift" class="touch-drift" aria-label="漂移">漂移</button><button data-touch="nitro" class="touch-nitro" aria-label="使用氮气">${boltIcon}</button><button data-touch="brake" class="touch-brake" aria-label="刹车">刹车</button><button data-touch="throttle" class="touch-throttle" aria-label="加速">油门</button></div></div>
     `;
+    const itemButton=document.createElement('button');itemButton.dataset.touch='useItem';itemButton.className='touch-item';itemButton.setAttribute('aria-label','使用道具');itemButton.hidden=true;itemButton.innerHTML='<span aria-hidden="true">✦</span><small>道具</small>';this.root.querySelector('.touch-controls').append(itemButton);
     this.el = selector => this.root.querySelector(selector);
     this.all = selector => [...this.root.querySelectorAll(selector)];
     this.minimap = this.el('#minimap');
@@ -118,7 +119,7 @@ export class UI {
     this.el('.start-room-button').addEventListener('click', () => this.callbacks.onStartRoom?.());
     this.el('.leave-room-button').addEventListener('click', () => { this.callbacks.onLeaveRoom?.(); this.room = null; this.showMenu(); });
     this.el('.copy-room-button').addEventListener('click', async () => { try { await navigator.clipboard.writeText(this.room?.code || ''); this.showToast('房间号已复制，邀请好朋友来追风吧'); } catch { this.showToast(`房间号：${this.room?.code || ''}`); } });
-    this.touchControls=new TouchControls(this.all('[data-touch]'),{state:this.touchState});
+    this.touchControls=new TouchControls(this.all('[data-touch]'),{state:this.touchState,onChange:state=>{if(state.useItem&&!this.itemHeld)this.callbacks.onItemPress?.();this.itemHeld=state.useItem;}});
   }
 
   beginRace() {
@@ -202,7 +203,7 @@ export class UI {
     this.loading = p < 1;
     this.el('.start-button').disabled = p < 1;
     this.el('.friend-button').disabled = p < 1;
-    if(this.room)this.el('.start-room-button').disabled=p<1||(this.room.players?.length||0)<2;
+    if(this.room)this.el('.start-room-button').disabled=p<1||(this.room.players?.filter(player=>player.connected!==false).length||0)<2;
     this.el('.loading-label').textContent = p >= 1 ? '3 圈竞速 · 8 位车手 · 一路好心情' : `正在准备晴空海岸… ${Math.round(p * 100)}%`;
     this.el('.ready-dot').classList.toggle('loading', p < 1);
   }
@@ -239,6 +240,7 @@ export class UI {
       ['left','转向与过弯',`${text('left')} 向左，${text('right')} 向右。草地会让赛车减速。`],
       ['drift','漂移，攒一点惊喜','转弯时按住漂移，蓄力后松开获得加速。'],
       ['nitro','释放晴空氮气','漂移补充能量，按住氮气键提速。'],
+      ['useItem','把道具留给好时机','道具赛经过彩色箱子获得一个道具；按道具键使用。竞速赛没有道具。'],
     ];
     this.el('.keyboard-help-list').innerHTML=help.map(([action,title,description])=>`<div><span class="help-keys">${chips(action)}</span><p><strong>${title}</strong><small>${escapeHTML(description)}</small></p></div>`).join('');
     this.updateKeyboardFootnote();
@@ -281,7 +283,7 @@ export class UI {
     this.el('.room-content').hidden = true;
     this.el('#room-code-input').value = '';
     this.el('.lobby-status').textContent = '创建房间，或输入朋友的房间号';
-    this.el('.lobby-description').textContent = `本次目的地：${this.track?.name || '晴空大环岛'}。分享房间号，邀请朋友一起出发。`;
+    this.el('.lobby-description').textContent = `本次目的地：${this.track?.name || '晴空大环岛'} · ${this.raceMode==='items'?'道具赛':'竞速赛'}。分享房间号，邀请朋友一起出发。`;
   }
 
   showLobby(data = {}) {
@@ -294,13 +296,15 @@ export class UI {
     this.el('.room-entry').hidden = true;
     this.el('.room-content').hidden = false;
     this.el('.room-code').textContent = data.code || '------';
-    this.el('.lobby-description').textContent = `比赛赛道：${this.track?.name || '晴空大环岛'} · 3 圈竞速`;
+    this.el('.lobby-description').textContent = `比赛赛道：${this.track?.name || '晴空大环岛'} · 3 圈 · `;
+    const modeLabel=document.createElement('strong');modeLabel.className='room-mode';modeLabel.textContent=data.mode==='items'?'道具赛':'竞速赛';this.el('.lobby-description').append(modeLabel);
     const players = data.players || [];
-    this.el('.lobby-players').innerHTML = players.map((p, i) => `<div class="lobby-player"><span class="lobby-avatar">${icons[p.character] || foxIcon}</span><span><strong>${escapeHTML(p.name || chars[p.character]?.name || `车手 ${i + 1}`)}</strong><small>${p.id === data.hostId ? '房主' : '已上车'}${p.id === data.selfId ? ' · 你' : ''}</small></span><span class="player-ready">●</span></div>`).join('') + Array.from({ length: Math.max(0, 4 - players.length) }, (_, i) => `<div class="lobby-player empty"><span class="empty-avatar">+</span><span>等一位好朋友<small>没有玩家时由 AI 补齐</small></span></div>`).join('');
+    this.el('.lobby-players').innerHTML = players.map((p, i) => `<div class="lobby-player"><span class="lobby-avatar">${icons[p.character] || foxIcon}</span><span><strong>${escapeHTML(p.name || chars[p.character]?.name || `车手 ${i + 1}`)}</strong><small>${p.connected === false ? '重连中 · AI 暂代' : p.id === data.hostId ? '房主' : '已上车'}${p.id === data.selfId ? ' · 你' : ''}</small></span><span class="player-ready">${p.connected === false ? '◌' : '●'}</span></div>`).join('') + Array.from({ length: Math.max(0, 4 - players.length) }, (_, i) => `<div class="lobby-player empty"><span class="empty-avatar">+</span><span>等一位好朋友<small>没有玩家时由 AI 补齐</small></span></div>`).join('');
     const host = data.hostId === data.selfId;
     this.el('.start-room-button').hidden = !host;
-    this.el('.start-room-button').disabled = players.length < 2 || Boolean(this.loading);
-    this.el('.start-room-button span').textContent = players.length < 2 ? '等一位好友上车' : '全员上车，出发！';
+    const connectedPlayers=players.filter(player=>player.connected!==false).length;
+    this.el('.start-room-button').disabled = connectedPlayers < 2 || Boolean(this.loading);
+    this.el('.start-room-button span').textContent = connectedPlayers < 2 ? '等一位好友上车' : '全员上车，出发！';
     this.el('.waiting-host').hidden = host;
     this.el('.lobby-status').textContent = data.status === 'lobby' || !data.status ? '房间已就绪，分享房间号邀请好友' : data.status;
   }
@@ -312,7 +316,7 @@ export class UI {
     this.el('.course-number').textContent = String(['sunny-island','candy-hills','bay-loop','starlight-canyon'].indexOf(track.id)+1).padStart(2,'0');
     this.el('.course-weather').innerHTML = track.id === 'starlight-canyon' ? '✦<small>星夜</small>' : '☀<small>晴朗</small>';
     this.currentZone = null;
-    this.el('.edition').textContent = 'VOL. 03';
+    this.el('.edition').textContent = 'VOL. 04';
     this.el('.ready-line .loading-label').textContent = `${(track.length / 1000).toFixed(2)} km / 圈 · ${track.zones?.length || 1} 大区域 · 8 位车手`;
     if (!this.el('.course-zone')) { const zone = document.createElement('span');zone.className='course-zone';this.el('.lap-panel').append(zone); }
     this.updateCourse(0);
@@ -328,11 +332,11 @@ export class UI {
       this.el('.minimap-panel > span').textContent=`${zone.name} · ${(this.track.length/1000).toFixed(2)} km`;
     }
   }
-  setNetwork({ connected, ping, error, message } = {}) {
+  setNetwork({ connected, ping, error, message, reconnecting } = {}) {
     const badge = this.el('.network-status');
     badge.hidden = connected === undefined && !error;
     badge.classList.toggle('offline', !connected);
-    badge.textContent = error ? '连接中断' : connected ? `● 已连接${Number.isFinite(ping) ? ` · ${Math.round(ping)} ms` : ''}` : '● 正在连接';
+    badge.textContent = error ? '连接中断' : connected ? `● 已连接${Number.isFinite(ping) ? ` · ${Math.round(ping)} ms` : ''}` : reconnecting ? '◌ 正在恢复比赛 · AI 暂代' : '● 正在连接';
     if (error) this.el('.lobby-status').textContent = error;
     else if(message)this.el('.lobby-status').textContent=message;
   }

@@ -65,6 +65,19 @@ test('layout save errors are visible and a too-small saved layout uses a safe pr
   f.resize(320,200);assert.equal(f.root.dataset.customControls,'false');assert.deepEqual(settings.layoutEditor.layouts.landscape,stored);
 });
 
+test('the seventh item control can be moved and saved independently without changing the original six positions', t=>{
+  const f=fixture(t),settings=new GameSettings(f.root,{storage:f.storage});settings.open();
+  f.root.querySelector('.settings-custom-layout').click();
+  const existing=['left','right','drift','nitro','brake','throttle'];
+  const before=Object.fromEntries(existing.map(action=>{const button=f.root.querySelector(`[data-layout-action="${action}"]`);return[action,{left:button.style.left,top:button.style.top}];}));
+  const item=f.root.querySelector('[data-layout-action="useItem"]');drag(f,item,90,-30);
+  const expected={left:item.style.left,top:item.style.top};f.root.querySelector('.control-editor-save').click();
+  assert.equal(settings.layoutEditor.isOpen,false);assert.ok(JSON.parse(f.storage.getItem(CONTROL_LAYOUT_STORAGE_KEY)).landscape.useItem);
+  const reloaded=fixture(t,f.storage);new GameSettings(reloaded.root,{storage:f.storage});
+  for(const action of existing){const button=reloaded.root.querySelector(`[data-touch="${action}"]`);assert.equal(button.style.left,before[action].left);assert.equal(button.style.top,before[action].top);}
+  const actual=reloaded.root.querySelector('[data-touch="useItem"]');assert.equal(actual.style.left,expected.left);assert.equal(actual.style.top,expected.top);
+});
+
 test('course picker exposes four distinct previews, selection callback, Escape and loading lock', t=>{
   const f=fixture(t);let chosen;
   const picker=new CoursePicker(f.root,{onSelect:id=>{chosen=id;picker.setSelected(id);}});

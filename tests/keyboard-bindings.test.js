@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  KEYBOARD_ACTIONS, DEFAULT_KEY_BINDINGS, KEY_BINDINGS_STORAGE_KEY,
+  KEYBOARD_ACTIONS, DEFAULT_KEY_BINDINGS, KEY_BINDINGS_STORAGE_KEY, LEGACY_KEY_BINDINGS_STORAGE_KEY,
   isBindableCode, keyLabel, validateKeyBindings, readKeyBindings, saveKeyBindings,
   assignKeyBinding, isActionPressed, actionForKey,
 } from '../src/keyboard-bindings.js';
@@ -9,7 +9,8 @@ import {
 const defaults = () => validateKeyBindings(DEFAULT_KEY_BINDINGS);
 
 test('default keyboard bindings cover every action and preserve the alternative driving keys', () => {
-  assert.equal(KEYBOARD_ACTIONS.length, 9);
+  assert.equal(KEYBOARD_ACTIONS.length, 10);
+  assert.deepEqual(DEFAULT_KEY_BINDINGS.useItem, ['KeyE']);
   assert.deepEqual(defaults(), DEFAULT_KEY_BINDINGS);
   assert.equal(Object.isFrozen(DEFAULT_KEY_BINDINGS), true);
   for (const { id } of KEYBOARD_ACTIONS) {
@@ -25,14 +26,14 @@ test('default keyboard bindings cover every action and preserve the alternative 
 
 test('rebinding replaces the selected slot immediately, keeps alternatives and never mutates the original', () => {
   const initial = defaults();
-  const { bindings, error } = assignKeyBinding(initial, 'throttle', 0, 'KeyE');
+  const { bindings, error } = assignKeyBinding(initial, 'throttle', 0, 'KeyI');
   assert.equal(error, null);
-  assert.deepEqual(bindings.throttle, ['KeyE', 'ArrowUp']);
+  assert.deepEqual(bindings.throttle, ['KeyI', 'ArrowUp']);
   assert.deepEqual(initial, DEFAULT_KEY_BINDINGS);
-  assert.equal(isActionPressed(new Set(['KeyE']), bindings, 'throttle'), true);
+  assert.equal(isActionPressed(new Set(['KeyI']), bindings, 'throttle'), true);
   assert.equal(isActionPressed(new Set(['KeyW']), bindings, 'throttle'), false);
   assert.equal(isActionPressed(new Set(['ArrowUp']), bindings, 'throttle'), true);
-  assert.equal(actionForKey(bindings, 'KeyE'), 'throttle');
+  assert.equal(actionForKey(bindings, 'KeyI'), 'throttle');
   assert.equal(actionForKey(bindings, 'KeyW'), undefined);
 });
 
@@ -41,6 +42,7 @@ test('occupied and duplicate keys are rejected with the conflicting action name 
     ['throttle', 0, 'KeyS', '刹车'],
     ['throttle', 0, 'ArrowUp', '加速'],
     ['left', 1, 'KeyD', '向右转向'],
+    ['throttle', 0, 'KeyE', '使用道具'],
   ]) {
     const original = defaults(), result = assignKeyBinding(original, action, slot, code);
     assert.match(result.error, new RegExp(conflict));
@@ -99,7 +101,7 @@ test('incomplete, conflicting, unsafe and prototype-bearing records revert to a 
 test('saved remaps reload independently of touch settings and storage failures stay recoverable', () => {
   const values = new Map([['sunny-settings-v1', '{"buttonSize":76}'], ['sunny-touch-layout-v1', '{"landscape":{}}']]);
   const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) };
-  const custom = assignKeyBinding(DEFAULT_KEY_BINDINGS, 'throttle', 0, 'KeyE').bindings;
+  const custom = assignKeyBinding(DEFAULT_KEY_BINDINGS, 'throttle', 0, 'KeyI').bindings;
   assert.equal(saveKeyBindings(storage, custom), true);
   assert.equal(values.has(KEY_BINDINGS_STORAGE_KEY), true);
   assert.deepEqual(readKeyBindings(storage), custom);
@@ -112,6 +114,32 @@ test('saved remaps reload independently of touch settings and storage failures s
   assert.deepEqual(readKeyBindings({ getItem() { throw new Error('denied'); } }), DEFAULT_KEY_BINDINGS);
   assert.equal(saveKeyBindings({ setItem() { throw new Error('quota'); } }, custom), false);
   assert.equal(saveKeyBindings(undefined, custom), false);
+});
+
+test('legacy nine-action mappings retain every slot and add an unoccupied item key without changing v1 storage', () => {
+  for (const occupied of [false, true]) {
+    const legacy = Object.fromEntries(Object.entries(defaults()).filter(([action]) => action !== 'useItem'));
+    if (occupied) { legacy.throttle = ['KeyE', 'KeyF'];legacy.brake = ['KeyG', 'KeyC']; }
+    const original = JSON.stringify(legacy), values = new Map([[LEGACY_KEY_BINDINGS_STORAGE_KEY, original]]);
+    const storage = { getItem:key => values.get(key), setItem:(key,value) => values.set(key,value) };
+    const migrated = readKeyBindings(storage);
+    for (const [action, codes] of Object.entries(legacy)) assert.deepEqual(migrated[action], codes);
+    assert.equal(migrated.useItem[0], occupied ? 'KeyV' : 'KeyE');
+    assert.equal(values.get(LEGACY_KEY_BINDINGS_STORAGE_KEY), original);
+    assert.equal(values.has(KEY_BINDINGS_STORAGE_KEY), false, 'reading does not claim to persist a migration');
+    assert.deepEqual(validateKeyBindings(migrated), migrated);
+    assert.equal(saveKeyBindings(storage, migrated), true);
+    assert.deepEqual(readKeyBindings(storage), migrated);
+    assert.equal(values.get(LEGACY_KEY_BINDINGS_STORAGE_KEY), original);
+    saveKeyBindings(storage, DEFAULT_KEY_BINDINGS);
+    assert.deepEqual(readKeyBindings(storage), DEFAULT_KEY_BINDINGS, 'explicit v2 reset wins over historical remaps');
+  }
+});
+
+test('partial or conflicting legacy mappings do not acquire valid status through migration', () => {
+  const legacy = Object.fromEntries(Object.entries(defaults()).filter(([action]) => action !== 'useItem'));
+  for (const invalid of [{ throttle:['KeyE'] }, { ...legacy, left:['KeyW'] }, { ...legacy, unknown:['KeyZ'] }])
+    assert.deepEqual(readKeyBindings({ getItem:key => key === LEGACY_KEY_BINDINGS_STORAGE_KEY ? JSON.stringify(invalid) : null }), DEFAULT_KEY_BINDINGS);
 });
 
 test('malformed assignments and absent input state never throw or disable the current mapping', () => {

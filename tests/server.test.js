@@ -22,7 +22,7 @@ async function boot(t) {
 }
 
 async function connect(port, t) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?protocolVersion=4`);
   t.after(() => ws.close());
   const messages = [], pending = [];
   ws.on('message', bytes => {
@@ -42,7 +42,7 @@ async function connect(port, t) {
   };
   await once(ws, 'open');
   const welcome = await wait(m => m.type === 'welcome');
-  return { ws, id: welcome.id, wait, send: data => ws.send(JSON.stringify(data)) };
+  return { ws, id: welcome.id, wait, send: data => ws.send(JSON.stringify({protocolVersion:4,...data})) };
 }
 
 test('two real WebSocket clients create/join/start, receive authoritative movement and transfer host', { timeout: 12000 }, async t => {
@@ -100,9 +100,9 @@ test('every new course stays authoritative across room joins, start and snapshot
   for(const trackId of health.trackIds.slice(1)){
     a.send({type:'create',trackId,character:'fox'});
     const room=await a.wait(m=>m.type==='room'&&m.status==='lobby'&&m.trackId===trackId);
-    b.send({type:'join',room:room.code,character:'rabbit',trackId:'sunny-island'});
-    assert.match((await b.wait(m=>m.type==='error')).message,/刷新游戏/,'stale clients cannot silently render the wrong circuit');
     b.send({type:'join',room:room.code,character:'rabbit',trackId:'sunny-island',protocolVersion:3});
+    assert.match((await b.wait(m=>m.type==='error')).message,/刷新游戏/,'stale clients cannot silently render the wrong circuit');
+    b.send({type:'join',room:room.code,character:'rabbit',trackId:'sunny-island',protocolVersion:4});
     const joined=await b.wait(m=>m.type==='room'&&m.code===room.code);
     assert.equal(joined.trackId,trackId,'a guest cannot override the host course');
     a.send({type:'start'});

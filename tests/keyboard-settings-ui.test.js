@@ -53,6 +53,17 @@ test('recording updates the chosen binding, notifies the game immediately and su
   assert.match(f.root.querySelector('.settings-tip p').textContent,/F/,'desktop driving guidance uses current bindings');
 });
 
+test('item action can be rebound and reloaded through the same conflict-safe settings UI', t => {
+  const f=fixture(t);f.settings.open();
+  assert.equal(f.button('useItem').textContent,'E');
+  f.button('useItem').click();f.press('KeyW');
+  assert.deepEqual(f.settings.bindings.useItem,['KeyE']);assert.ok(f.settings.recording);
+  f.press('KeyP');assert.deepEqual(f.settings.bindings.useItem,['KeyP']);
+  assert.equal(f.button('useItem').textContent,'P');
+  const reloaded=fixture(t,{storage:f.storage});assert.equal(reloaded.button('useItem').textContent,'P');
+  assert.deepEqual(reloaded.settings.bindings.throttle,DEFAULT_KEY_BINDINGS.throttle);
+});
+
 test('conflicts, browser combinations and IME input leave the previous binding intact', t => {
   const f = fixture(t);f.settings.open();f.button('throttle').click();
   f.press('KeyS');assert.deepEqual(f.settings.bindings.throttle,DEFAULT_KEY_BINDINGS.throttle);

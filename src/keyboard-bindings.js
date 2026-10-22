@@ -1,4 +1,5 @@
-export const KEY_BINDINGS_STORAGE_KEY = 'sunny-keyboard-v1';
+export const KEY_BINDINGS_STORAGE_KEY = 'sunny-keyboard-v2';
+export const LEGACY_KEY_BINDINGS_STORAGE_KEY = 'sunny-keyboard-v1';
 
 export const KEYBOARD_ACTIONS = Object.freeze([
   { id: 'throttle', label: '加速' },
@@ -7,6 +8,7 @@ export const KEYBOARD_ACTIONS = Object.freeze([
   { id: 'right', label: '向右转向' },
   { id: 'drift', label: '漂移' },
   { id: 'nitro', label: '氮气' },
+  { id: 'useItem', label: '使用道具' },
   { id: 'autoThrottle', label: '自动油门' },
   { id: 'pause', label: '暂停 / 继续' },
   { id: 'restart', label: '重新比赛' },
@@ -19,6 +21,7 @@ export const DEFAULT_KEY_BINDINGS = Object.freeze(Object.fromEntries(Object.entr
   right: ['KeyD', 'ArrowRight'],
   drift: ['ShiftLeft', 'ShiftRight'],
   nitro: ['Space', 'KeyN'],
+  useItem: ['KeyE'],
   autoThrottle: ['KeyQ'],
   pause: ['Escape'],
   restart: ['KeyR'],
@@ -49,35 +52,52 @@ export function keyLabel(code) {
   return `小键盘${code.slice(6)}`;
 }
 
-function copyBindings(bindings = DEFAULT_KEY_BINDINGS) {
-  return Object.fromEntries(KEYBOARD_ACTIONS.map(({ id }) => [id, [...bindings[id]]]));
+const legacyActions = KEYBOARD_ACTIONS.filter(({ id }) => id !== 'useItem');
+
+function copyBindings(bindings = DEFAULT_KEY_BINDINGS, actions = KEYBOARD_ACTIONS) {
+  return Object.fromEntries(actions.map(({ id }) => [id, [...bindings[id]]]));
+}
+
+function parseBindings(value, actions = KEYBOARD_ACTIONS) {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    if (Object.keys(value).length !== actions.length) return null;
+    const used = new Set();
+    for (const { id } of actions) {
+      if (!Object.hasOwn(value, id)) return null;
+      const codes = value[id];
+      if (!Array.isArray(codes) || codes.length < 1 || codes.length > 2) return null;
+      for (const code of codes) {
+        if (!isBindableCode(code) || used.has(code)) return null;
+        used.add(code);
+      }
+    }
+    return copyBindings(value, actions);
+  } catch {
+    return null;
+  }
 }
 
 /** A corrupt or incomplete record cannot leave any driving action unbound. */
 export function validateKeyBindings(value) {
-  try {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return copyBindings();
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return copyBindings();
-    if (Object.keys(value).length !== KEYBOARD_ACTIONS.length) return copyBindings();
-    const used = new Set();
-    for (const { id } of KEYBOARD_ACTIONS) {
-      if (!Object.hasOwn(value, id)) return copyBindings();
-      const codes = value[id];
-      if (!Array.isArray(codes) || codes.length < 1 || codes.length > 2) return copyBindings();
-      for (const code of codes) {
-        if (!isBindableCode(code) || used.has(code)) return copyBindings();
-        used.add(code);
-      }
-    }
-    return copyBindings(value);
-  } catch {
-    return copyBindings();
-  }
+  return parseBindings(value) || copyBindings();
 }
 
 export function readKeyBindings(storage) {
-  try { return validateKeyBindings(JSON.parse(storage?.getItem(KEY_BINDINGS_STORAGE_KEY) || 'null')); }
+  try {
+    const saved = storage?.getItem(KEY_BINDINGS_STORAGE_KEY);
+    // A present v2 record is authoritative, even if it needs a safe fallback.
+    if (saved !== null && saved !== undefined) return validateKeyBindings(JSON.parse(saved));
+    const legacy = parseBindings(JSON.parse(storage?.getItem(LEGACY_KEY_BINDINGS_STORAGE_KEY) || 'null'), legacyActions);
+    if (!legacy) return copyBindings();
+    const used = new Set(Object.values(legacy).flat());
+    // Never steal E from a player's existing driving binding. There are more
+    // letters/digits than the eighteen slots in the old complete mapping.
+    const candidates = ['KeyE', 'KeyF', 'KeyG', 'KeyC', 'KeyV', 'KeyX', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(letter => `Key${letter}`), ...'1234567890'.split('').map(digit => `Digit${digit}`)];
+    return { ...legacy, useItem: [candidates.find(code => !used.has(code))] };
+  }
   catch { return copyBindings(); }
 }
 

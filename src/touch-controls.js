@@ -1,4 +1,4 @@
-const actions = new Set(['left', 'right', 'throttle', 'brake', 'drift', 'nitro']);
+const actions = new Set(['left', 'right', 'throttle', 'brake', 'drift', 'nitro', 'useItem']);
 
 /** Pointer ownership is separate from actions, so lifting one finger never
  * releases another finger that is holding the same control. */
@@ -85,6 +85,7 @@ export class TouchControls {
       steer: Number(held.has('right')) - Number(held.has('left')),
       drift: held.has('drift'),
       nitro: held.has('nitro'),
+      useItem: held.has('useItem'),
     });
     for (const button of this.buttons) {
       const active = held.has(button.dataset.touch);

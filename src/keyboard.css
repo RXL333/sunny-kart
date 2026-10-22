@@ -40,6 +40,9 @@
 #app[data-input-mode="keyboard"] .keyboard-help-footnote { display:block; }
 #app[data-input-mode="keyboard"] .race-hud .speed-panel { bottom:max(44px,calc(var(--keyboard-hint-height,32px) + 24px)); }
 #app[data-input-mode="keyboard"] .race-hud .nitro-panel { bottom:max(54px,calc(var(--keyboard-hint-height,32px) + 24px)); }
+/* Hybrid pointer devices can match the phone CSS while using a keyboard. */
+#app[data-input-mode="keyboard"] .race-hud .nitro-panel { left:var(--safe-left);right:auto;transform:none; }
+#app[data-input-mode="keyboard"] .race-hud .speed-panel { left:auto;right:var(--safe-right);transform:none;text-align:right; }
 @media (max-width:1050px), (max-height:600px) {
   #app[data-input-mode="keyboard"] .race-hint { gap:7px;font-size:9px;padding:7px 9px; }
   #app[data-input-mode="keyboard"] .key-hint { gap:3px; }

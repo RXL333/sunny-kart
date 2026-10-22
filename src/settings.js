@@ -197,8 +197,8 @@ export class GameSettings {
     this.overlay.querySelector('.settings-tip strong').textContent = keyboard ? '按得顺手，过弯才从容。' : '双手都舒服，弯道才顺手。';
     const side = this.values.controlLayout === 'left-handed' ? '右侧' : '左侧';
     this.overlay.querySelector('.settings-tip p').textContent = keyboard
-      ? `按住 ${this.bindings.drift.map(keyLabel).join(' / ')} 并转向来积攒漂移，松开后小喷；按住 ${this.bindings.nitro.map(keyLabel).join(' / ')} 释放氮气。`
-      : `${side}方向键可以按住或滑动切换；漂移转弯时按住，松开后小喷。⚡ 氮气可以与转向同时按住。`;
+      ? `按住 ${this.bindings.drift.map(keyLabel).join(' / ')} 并转向来积攒漂移，松开后小喷；按住 ${this.bindings.nitro.map(keyLabel).join(' / ')} 释放氮气。道具赛按 ${this.bindings.useItem.map(keyLabel).join(' / ')} 使用道具。`
+      : `${side}方向键可以按住或滑动切换；漂移转弯时按住，松开后小喷。⚡ 氮气可以与转向同时按住。道具赛点击道具按钮使用。`;
   }
 
   renderBindings() {

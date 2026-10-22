@@ -1,6 +1,6 @@
 {
   "name": "sunny-kart",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,13 +9,17 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.js",
     "start": "node server/index.js",
-    "dev:server": "node server/index.js"
+    "dev:server": "node server/index.js",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "perf:browser": "node scripts/performance-browser.mjs"
   },
   "dependencies": {
     "three": "^0.180.0",
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "happy-dom": "21.0.4",
     "vite": "^7.1.9"
   }
