@@ -23,6 +23,12 @@ export class CoursePicker {
     this.overlay.className = 'overlay courses-overlay'; this.overlay.hidden = true;
     this.overlay.innerHTML = `<div class="dialog courses-dialog" role="dialog" aria-modal="true" aria-labelledby="courses-title"><button class="close-button courses-close" type="button" aria-label="关闭赛道选择">×</button><span class="dialog-eyebrow">A NEW ROAD, A NEW ADVENTURE</span><h2 id="courses-title">下一站，快乐。</h2><p>四条路线，四种好心情。选一条去追风。</p><div class="course-cards">${TRACK_CATALOG.map((course, i) => `<button type="button" class="course-card" data-course="${course.id}" aria-pressed="false" style="--course-color:${course.color || '#80c9b4'}"><div class="course-preview"><span class="course-index">0${i+1}</span>${routePreview(course.id)}<span class="course-tag">${course.difficulty}</span></div><div class="course-card-copy"><small>${course.english || course.subtitle}</small><strong>${course.name}<span class="course-check" aria-hidden="true">✓</span></strong><p>${course.description}</p><span class="course-feature">${course.feature || course.subtitle}</span></div></button>`).join('')}</div><div class="courses-footnote">单人自由选择 · 好友房间使用房主选中的赛道</div></div>`;
     root.append(this.overlay);
+    for(const card of this.overlay.querySelectorAll('[data-course]')){
+      const description=root.ownerDocument.createElement('p');description.className='course-strategy';
+      const strategies=createTrack(card.dataset.course).strategySections;
+      description.textContent=`路线策略：${strategies.map(s=>s.label).join(' · ')}。绿线减速补能，橙线耗氮加速，中线自由通过。`;
+      card.querySelector('.course-card-copy').append(description);
+    }
     this.button.addEventListener('click', () => this.open());
     this.closeButton = this.overlay.querySelector('.courses-close');
     this.closeButton.addEventListener('click', () => this.close());

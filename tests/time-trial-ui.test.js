@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { TimeTrialUI, trialTime } from '../src/time-trial.js';
-import { GhostStore, ghostDeltaAt } from '../src/ghost.js';
+import { GhostStore, ghostDeltaAt, GHOST_PHYSICS_VERSION } from '../src/ghost.js';
 
 const meta = { trackId: 'sunny-island', trackLength: 100, character: 'fox', laps: 3 };
 function setup(t) {
@@ -92,7 +92,7 @@ test('long ghosts are indexed once and subsequent delta lookup touches no source
 });
 
 test('session best survives a denied persistence write and later slower saves', () => {
-  const recording = { schema: 1, mode: 'time-trial', ...meta, physicsVersion: 'sunny-physics-4', time: 30, samples: Array.from({ length: 301 }, (_, i) => [i / 10, i, 0, 0, 10]) };
+  const recording = { schema: 1, mode: 'time-trial', ...meta, physicsVersion: GHOST_PHYSICS_VERSION, time: 30, samples: Array.from({ length: 301 }, (_, i) => [i / 10, i, 0, 0, 10]) };
   const store = new GhostStore({ storage: { getItem() { return null; }, setItem() { throw new Error('full'); } } });
   assert.equal(store.save(recording).reason, 'storage');
   assert.equal(store.load(meta), recording);

@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from '../src/game/protocol.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -8,10 +9,10 @@ async function boot(t,grace='2000'){
  const child=spawn(process.execPath,['server/index.js'],{env:{...process.env,PORT:'0',RESUME_GRACE_MS:grace},stdio:['ignore','pipe','pipe']});t.after(()=>child.kill());
  return await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('startup timeout')),4000);child.on('error',reject);child.stdout.on('data',bytes=>{const m=String(bytes).match(/0\.0\.0\.0:(\d+)/);if(m){clearTimeout(timer);resolve(Number(m[1]));}});});
 }
-function peer(t,port,token,protocol=4){
+function peer(t,port,token,protocol=PROTOCOL_VERSION){
  const ws=new WebSocket(`ws://127.0.0.1:${port}/ws?protocolVersion=${protocol}${token?'&resume='+encodeURIComponent(token):''}`),messages=[],waiters=[];t.after(()=>ws.terminate());
  ws.on('error',()=>{});ws.on('message',bytes=>{const m=JSON.parse(bytes);const i=waiters.findIndex(w=>w.match(m));if(i>=0){const [w]=waiters.splice(i,1);clearTimeout(w.timer);w.resolve(m);}else messages.push(m);});
- return {ws,send:m=>ws.send(JSON.stringify({protocolVersion:4,...m})),wait(match){const i=messages.findIndex(match);if(i>=0)return Promise.resolve(messages.splice(i,1)[0]);return new Promise((resolve,reject)=>{const w={match,resolve};w.timer=setTimeout(()=>reject(new Error('message timeout')),5000);waiters.push(w);});}};
+ return {ws,send:m=>ws.send(JSON.stringify({protocolVersion:PROTOCOL_VERSION,...m})),wait(match){const i=messages.findIndex(match);if(i>=0)return Promise.resolve(messages.splice(i,1)[0]);return new Promise((resolve,reject)=>{const w={match,resolve};w.timer=setTimeout(()=>reject(new Error('message timeout')),5000);waiters.push(w);});}};
 }
 
 test('reconnect resumes original racing vehicle, confirms inputs, rejects duplicate connection, explicit leave releases seat',{timeout:15000},async t=>{
@@ -49,7 +50,7 @@ test('host transfer prefers online seats and the first returning player can host
 
 test('version gates protect new rooms, joining, starting and reserved-seat recovery',{timeout:10000},async t=>{
  const port=await boot(t),old=peer(t,port,undefined,3);
- const mismatch=await old.wait(m=>m.type==='protocolMismatch');assert.equal(mismatch.protocolVersion,4);assert.match(mismatch.message,/刷新游戏/);
+ const mismatch=await old.wait(m=>m.type==='protocolMismatch');assert.equal(mismatch.protocolVersion,PROTOCOL_VERSION);assert.match(mismatch.message,/刷新游戏/);
  const health=await(await fetch(`http://127.0.0.1:${port}/health`)).json();assert.equal(health.clients,0);assert.deepEqual(health.modes,['race','items']);assert.ok(health.capabilities.includes('manual-items'));
  const a=peer(t,port),b=peer(t,port);const wa=await a.wait(m=>m.type==='welcome');await b.wait(m=>m.type==='welcome');
  a.send({type:'create',mode:'items',protocolVersion:3});assert.match((await a.wait(m=>m.type==='error')).message,/版本正在更新/);
@@ -58,7 +59,7 @@ test('version gates protect new rooms, joining, starting and reserved-seat recov
  b.send({type:'join',room:room.code,protocolVersion:3});assert.match((await b.wait(m=>m.type==='error')).message,/版本正在更新/);
  b.send({type:'join',room:room.code});assert.equal((await b.wait(m=>m.type==='room')).mode,'items');
  a.send({type:'start',protocolVersion:3});assert.match((await a.wait(m=>m.type==='error')).message,/版本正在更新/);
- a.send({type:'start'});const started=await a.wait(m=>m.type==='started');assert.equal(started.state.mode,'items');assert.equal(started.protocolVersion,4);assert.equal(started.mode,'items');
+ a.send({type:'start'});const started=await a.wait(m=>m.type==='started');assert.equal(started.state.mode,'items');assert.equal(started.protocolVersion,PROTOCOL_VERSION);assert.equal(started.mode,'items');
  const snapshot=await b.wait(m=>m.type==='snapshot');assert.equal(snapshot.state.mode,'items');assert.equal(snapshot.mode,'items');assert.ok(Array.isArray(snapshot.state.itemObjects));
  const closed=once(a.ws,'close');a.ws.terminate();await closed;
  const badResume=peer(t,port,wa.resumeToken,3);await badResume.wait(m=>m.type==='protocolMismatch');

@@ -1,5 +1,5 @@
 // Local time-trial recordings. Versioning prevents comparing incompatible physics.
-export const GHOST_PHYSICS_VERSION = 'sunny-physics-4';
+export const GHOST_PHYSICS_VERSION = 'sunny-physics-5';
 export const GHOST_SAMPLE_INTERVAL = 0.1;
 export const MAX_GHOST_SECONDS = 1800;
 const MAX_SAMPLES = Math.ceil(MAX_GHOST_SECONDS / GHOST_SAMPLE_INTERVAL) + 2;

@@ -182,11 +182,77 @@ test('a restored seat requires release before accepting another use, and a new r
 test('item rooms announce their mode and require full compatible server capabilities',async t=>{
   stubBrowser(t);const network=new Network();
   const creating=network.create('panda','easy','sunny-island','items'),socket=FakeWebSocket.instances[0];
-  assert.match(socket.url,/protocolVersion=4/);socket.open();socket.receive(welcome({id:'seat-123'}));await creating;
+  assert.equal(new URL(socket.url).searchParams.get('protocolVersion'),String(PROTOCOL_VERSION));socket.open();socket.receive(welcome({id:'seat-123'}));await creating;
   assert.equal(socket.sent.find(message=>message.type==='create').mode,'items');
   network.message({type:'room',code:'ABC234',status:'lobby',mode:'items'});network.start();
-  assert.equal(socket.sent.find(message=>message.type==='start').protocolVersion,4);
+  assert.equal(socket.sent.find(message=>message.type==='start').protocolVersion,PROTOCOL_VERSION);
   const incompatible=new Network(),connecting=incompatible.connect(),old=FakeWebSocket.instances.at(-1);
   old.open();old.receive(welcome({id:'partial',capabilities:['input-ack','seat-resume']}));
   await assert.rejects(connecting,/刷新游戏/);assert.equal(old.readyState,FakeWebSocket.CLOSED);
+});
+
+test('party commands send the current round and only supported configuration fields', t => {
+  stubBrowser(t); const network = new Network(), socket = new FakeWebSocket('ws://localhost/ws');
+  socket.open(); network.socket = socket; network.message(welcome({ id: 'host' }));
+  network.message({ type: 'room', code: 'ABC234', status: 'finished', mode: 'items', roundId: 3 });
+  network.configure({ trackId: 'bay-loop', mode: 'race', difficulty: 'easy', laps: 1, hostId: 'cheat' });
+  network.voteTrack('candy-hills'); network.returnToLobby(); network.rematch();
+  assert.deepEqual(socket.sent, [
+    { type: 'configure', trackId: 'bay-loop', mode: 'race', difficulty: 'easy', laps: 1, protocolVersion: PROTOCOL_VERSION },
+    { type: 'voteTrack', trackId: 'candy-hills', protocolVersion: PROTOCOL_VERSION },
+    { type: 'returnToLobby', protocolVersion: PROTOCOL_VERSION },
+    { type: 'start', roundId: 3, protocolVersion: PROTOCOL_VERSION },
+  ]);
+});
+
+test('round event confirmation survives seat recovery and rejects duplicate, old-round and wrong-room packets', t => {
+  stubBrowser(t); const starts = [], snapshots = [];
+  const network = new Network({ started: state => starts.push(state), snapshot: state => snapshots.push(state) });
+  const state = events => ({ racers: [{ id: 'seat' }], events });
+  const start = (roundId, events = [], extra = {}) => ({ type: 'started', roundId, roomCode: 'ABC234', state: state(events), ...extra });
+  const snapshot = (tick, events = [], extra = {}) => ({ type: 'snapshot', tick, roundId: 1, roomCode: 'ABC234', state: state(events), ...extra });
+  const hit = { type: 'itemHit', eventId: 'ABC234:1:1' };
+  network.message(welcome({ id: 'seat' }));
+  network.message({ type: 'room', code: 'ABC234', status: 'racing' });
+  network.message(start(1, [hit]));
+  network.message(start(1, [hit]));
+  assert.equal(starts.length, 1, 'repeated started cannot restart the race');
+  network.message(snapshot(1, [hit]));
+  assert.deepEqual(snapshots.at(-1).events, []);
+  network.message(snapshot(2, [{ type: 'shieldBlock', eventId: 'ABC234:1:2' }]));
+  network.message(snapshot(2, [{ type: 'itemHit', eventId: 'ABC234:1:3' }]));
+  assert.equal(snapshots.length, 2, 'duplicate ticks cannot deliver duplicate effects');
+  assert.equal(network.eventIds.has('ABC234:1:3'), false, 'unaccepted snapshots do not mark events consumed');
+  network.message(welcome({ id: 'seat', resumed: true }));
+  network.message(start(1, [hit], { resumed: true }));
+  assert.deepEqual(starts.at(-1).events, [], 'same-round recovery cannot replay an already heard hit');
+  network.message(snapshot(3, [{ type: 'itemHit', eventId: 'ABC234:1:3' }]));
+  assert.equal(snapshots.at(-1).events.length, 1);
+  network.message(start(2, [{ type: 'countdown', eventId: 'ABC234:2:1' }]));
+  const count = snapshots.length;
+  network.message(snapshot(4, [hit]));
+  network.message(snapshot(4, [], { roundId: 2, roomCode: 'OTHER1' }));
+  assert.equal(snapshots.length, count);
+  network.message(start(1)); assert.equal(starts.length, 3, 'an old round cannot replace a rematch');
+  network.message({ type: 'room', code: 'ABC234', status: 'lobby' });
+  network.message(snapshot(5, [], { roundId: 2 }));
+  assert.equal(snapshots.length, count, 'a late packet cannot restore a race after returning to the lobby');
+});
+
+test('confirmed event memory is bounded and leaving clears it for the next party', t => {
+  stubBrowser(t); const network = new Network();
+  for (let i = 0; i < 1400; i++) network.confirmedState({ events: [{ eventId: `event-${i}` }] });
+  assert.equal(network.eventIds.size, 1024);
+  assert.equal(network.eventIds.has('event-1399'), true);
+  network.leave(); assert.equal(network.eventIds.size, 0);
+});
+
+test('replaced sockets cannot deliver late race messages into the active party', async t => {
+  stubBrowser(t); const rooms = [], network = new Network({ room: room => rooms.push(room) });
+  const connecting = network.connect(), old = FakeWebSocket.instances[0];
+  old.open(); old.receive(welcome({ id: 'seat' })); await connecting;
+  const current = new FakeWebSocket('ws://localhost/ws'); current.open(); network.socket = current;
+  old.receive({ type: 'room', code: 'STALE1', status: 'racing' });
+  assert.equal(rooms.length, 0); assert.equal(network.room, null);
+  old.close(); network.leave();
 });

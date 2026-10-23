@@ -1,13 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Race } from '../src/game/race.js';
-import { PHYSICS, kartContact, kineticEnergy, resolveRailCollision, solveKartCollisions, stepKartPhysics } from '../src/game/physics.js';
+import { PHYSICS, kartContact, kineticEnergy, resolveRailCollision, solveKartCollisions, stepKartPhysics, steeringRate } from '../src/game/physics.js';
 
 const straight = { length: 10000, width: 16, railOffset: 11, boostPads: [], coins: [], sample: distance => ({ heading: 0, curvature: 0, slope: 0, tx: 0, tz: 1, nx: 1, nz: 0, x: 0, y: 5, z: distance }) };
 const car = (id, values = {}) => ({ id, distance: 50, offset: 0, speed: 20, lateralVelocity: 0, yaw: 0, yawRate: 0, isDrifting: false, ...values });
 const totalEnergy = cars => cars.reduce((sum, r) => sum + kineticEnergy(r), 0);
 const input = overrides => ({ throttle: 0, brake: 0, steer: 0, drift: false, ...overrides });
 const penetration = (a, b) => kartContact(a, b, straight)?.penetration || 0;
+
+test('turning stays agile at low speed, becomes stable at high speed, and never rotates a parked kart', () => {
+  assert.equal(steeringRate(0), 0);
+  assert.ok(steeringRate(8) > steeringRate(24));
+  assert.ok(steeringRate(24) > steeringRate(46));
+  assert.ok(steeringRate(24, 1, true) > steeringRate(24, 1, false));
+  assert.ok(steeringRate(24, 1.18) > steeringRate(24, .9));
+});
+
+test('cars on separated elevations never exchange collision momentum', () => {
+  const bridge = { ...straight, sample: d => ({ ...straight.sample(d), y: d > 51 ? 10 : 0 }) };
+  const a = car('lower', { distance: 50, speed: 34 }), b = car('upper', { distance: 52, speed: 9 });
+  assert.equal(kartContact(a, b, bridge), null);
+  assert.deepEqual(solveKartCollisions([a, b], bridge), []);
+  assert.equal(a.speed, 34); assert.equal(b.speed, 9);
+});
 
 test('rear-end contact transfers momentum, separates rounded bodies and cannot add kinetic energy', () => {
   const a = car('rear', { distance: 50, speed: 34 }), b = car('front', { distance: 52.7, speed: 9 });

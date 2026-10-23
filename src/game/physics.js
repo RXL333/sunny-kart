@@ -106,7 +106,7 @@ function pose(racer, track) {
   const nx = p.nx ?? tz, nz = p.nz ?? -tx;
   const sin = Math.sin(racer.yaw || 0), cos = Math.cos(racer.yaw || 0);
   return {
-    x: (p.x ?? 0) + nx * racer.offset, z: (p.z ?? racer.distance) + nz * racer.offset,
+    x: (p.x ?? 0) + nx * racer.offset, y: p.y ?? 0, z: (p.z ?? racer.distance) + nz * racer.offset,
     tx, tz, nx, nz, fx: tx * cos + nx * sin, fz: tz * cos + nz * sin,
     metric: clamp(1 - (p.curvature || 0) * racer.offset, 0.3, 1.6),
   };
@@ -117,6 +117,7 @@ export function kartContact(a, b, track) {
   const along = nearestDelta(a, b, track.length);
   if (Math.abs(along) > 10 || Math.abs(a.offset - b.offset) > 4) return null;
   const pa = pose(a, track), pb = pose(b, track);
+  if (Math.abs(pa.y - pb.y) > 2.5) return null;
   let deepest = null;
   for (const frontA of [-1, 1]) for (const frontB of [-1, 1]) {
     const ax = pa.x + pa.fx * PHYSICS.bodyHalfSpan * frontA;

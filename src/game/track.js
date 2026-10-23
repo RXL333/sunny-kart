@@ -1,3 +1,5 @@
+import { createMapStrategies } from './map-strategies.js';
+
 // Horizontal metres, elevation, and road curvature share one continuous frame.
 const mod = (a, n) => ((a % n) + n) % n;
 const angle = a => Math.atan2(Math.sin(a), Math.cos(a));
@@ -139,7 +141,8 @@ export function createTrack(id = DEFAULT_TRACK_ID) {
     const lane = definition.coinStyle === 'wave' ? Math.sin((i * 3 + j) * .38) * 3.6 : definition.coinStyle === 'sweep' ? (i % 4 < 2 ? -2.7 : 2.7) : i % 2 ? -2.4 : 2.4;
     return { id: `energy-${i}-${j}`, distance: (i + .5) / coinGroups * length + gap, lane };
   })).flat();
-  return { ...metadata, length, width: 16, railOffset: 11, sample, points, controlPoints: controls.map(p => [p[0], p[1]]), bounds, mapScale: Math.max(bounds.width, bounds.depth), zones, zoneAt, boostPads, coins, energyCrystals: coins, itemBoxes: [] };
+  const strategies = createMapStrategies(id, length, sample);
+  return { ...metadata, length, width: 16, railOffset: 11, sample, points, controlPoints: controls.map(p => [p[0], p[1]]), bounds, mapScale: Math.max(bounds.width, bounds.depth), zones, zoneAt, boostPads, coins, energyCrystals: coins, itemBoxes: [], ...strategies };
 }
 
 export const track = createTrack();

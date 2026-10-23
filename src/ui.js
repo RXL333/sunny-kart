@@ -95,7 +95,7 @@ export class UI {
     this.all('[data-character]').forEach(button => button.addEventListener('click', () => {
       this.character = button.dataset.character;
       this.all('[data-character]').forEach(b => { const selected = b === button; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', selected); });
-      this.el('.driver-motto').textContent = chars[this.character].subtitle;
+      this.el('.driver-motto').textContent = this.driverTitle || chars[this.character].subtitle;
       this.callbacks.onCharacterChange?.(this.character);
     }));
     this.all('[data-difficulty]').forEach(button => button.addEventListener('click', () => {
@@ -177,7 +177,8 @@ export class UI {
     this.el('.nitro-panel').classList.toggle('nitro-ready', nitro >= 25);
     const charge = Math.max(0, Math.min(100, (player.driftCharge || 0) / (player.maxDriftCharge || 1) * 100));
     this.el('.drift-track span').style.width = `${charge}%`;
-    this.el('.drift-label').textContent = player.boost > 0 ? '加速中！' : charge > 45 ? '松开，向前冲！' : '漂移蓄力';
+    const stage=player.driftStage||0;this.el('.speed-panel').dataset.driftStage=String(stage);
+    this.el('.drift-label').textContent = player.driftBoost > 0 ? '出弯小喷！' : stage > 0 ? ['','蓝焰 · 松开小喷','金焰 · 松开强喷','紫焰 · 松开完美喷'][stage] : '漂移蓄力';
     this.el('.speed-panel').classList.toggle('boosting', player.boost > 0);
   }
 
@@ -248,6 +249,7 @@ export class UI {
   }
   setAutoThrottle(active,remember=true) { this.autoThrottle = !!active; const button = this.el('.auto-throttle-button'); button.classList.toggle('active', this.autoThrottle); button.setAttribute('aria-pressed', this.autoThrottle);if(remember){this.autoThrottleChosen=true;this.callbacks.onAutoThrottleChange?.(this.autoThrottle);} }
   setMuted(muted) { this.muted = !!muted; const button = this.el('.sound-button'); button.classList.toggle('muted', this.muted); button.setAttribute('aria-label', this.muted ? '开启声音' : '关闭声音'); button.title = this.muted ? '开启声音' : '关闭声音'; }
+  setDriverTitle(title) { this.driverTitle=title==='晴空杯车手'?title:'';this.el('.driver-motto').textContent=this.driverTitle||chars[this.character].subtitle; }
   setControlLayout(layout) {
     const mirrored=layout==='left-handed',side=mirrored?'右侧':'左侧';
     this.el('.mobile-hint').textContent=mirrored?'横屏更尽兴 · 右手转向，左手漂移与氮气':'横屏更尽兴 · 左手转向，右手漂移与氮气';
@@ -289,6 +291,7 @@ export class UI {
   showLobby(data = {}) {
     this.room = data;
     this.phase = 'lobby';
+    this.root.classList.remove('in-race');this.mobile?.sync();this.el('.countdown').hidden=true;this.el('.pause-button').hidden=true;this.clearTouch();
     this.el('.menu-screen').hidden = true;
     this.el('.race-hud').hidden = true;
     this.el('.touch-controls').hidden = true;
@@ -296,7 +299,7 @@ export class UI {
     this.el('.room-entry').hidden = true;
     this.el('.room-content').hidden = false;
     this.el('.room-code').textContent = data.code || '------';
-    this.el('.lobby-description').textContent = `比赛赛道：${this.track?.name || '晴空大环岛'} · 3 圈 · `;
+    this.el('.lobby-description').textContent = `比赛赛道：${this.track?.name || '晴空大环岛'} · ${data.laps||3} 圈 · `;
     const modeLabel=document.createElement('strong');modeLabel.className='room-mode';modeLabel.textContent=data.mode==='items'?'道具赛':'竞速赛';this.el('.lobby-description').append(modeLabel);
     const players = data.players || [];
     this.el('.lobby-players').innerHTML = players.map((p, i) => `<div class="lobby-player"><span class="lobby-avatar">${icons[p.character] || foxIcon}</span><span><strong>${escapeHTML(p.name || chars[p.character]?.name || `车手 ${i + 1}`)}</strong><small>${p.connected === false ? '重连中 · AI 暂代' : p.id === data.hostId ? '房主' : '已上车'}${p.id === data.selfId ? ' · 你' : ''}</small></span><span class="player-ready">${p.connected === false ? '◌' : '●'}</span></div>`).join('') + Array.from({ length: Math.max(0, 4 - players.length) }, (_, i) => `<div class="lobby-player empty"><span class="empty-avatar">+</span><span>等一位好朋友<small>没有玩家时由 AI 补齐</small></span></div>`).join('');

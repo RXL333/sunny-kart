@@ -1,5 +1,14 @@
 import { PHYSICS, curvatureAt, offroadAmount, steeringRate, stepKartPhysics, solveKartCollisions } from './physics.js';
-import { ITEMS, ITEM_RULES, chooseItem, createItemBoxes } from './items.js';
+import { ITEMS, ITEM_RULES, chooseItem, createItemBoxes, itemThreatFor } from './items.js';
+
+export const DRIFT_STAGES = Object.freeze([
+  Object.freeze({ stage: 1, threshold: .24, duration: .8, nitro: 14, label: '蓝焰', color: '#68d7ff' }),
+  Object.freeze({ stage: 2, threshold: .55, duration: 1.3, nitro: 24, label: '金焰', color: '#ffc65d' }),
+  Object.freeze({ stage: 3, threshold: .85, duration: 1.9, nitro: 36, label: '紫焰', color: '#d59aff' }),
+]);
+export const driftStageFor = charge => DRIFT_STAGES.filter(s => charge >= s.threshold).length;
+export const AI_PERSONALITIES = Object.freeze({ steady: '稳健车手', defensive: '防守车手', drifter: '漂移进攻手' });
+const newStats = () => ({ bestDrift: 0, driftBoosts: 0, overtakes: 0, itemHits: 0, blocks: 0, collisions: 0, wallHits: 0, clean: true, draftBoosts: 0 });
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const finite = (v, fallback = 0) => Number.isFinite(v) ? v : fallback;
@@ -37,6 +46,7 @@ export class Race {
     this.phase = 'menu'; this.countdown = 3; this.elapsed = 0; this.finishTime = null;
     this.results = []; this.events = []; this.leaderFinishTime = null;
     this.itemObjects = []; this.nextItemObjectId = 0;
+    this.passStates = {};
     this.itemRandomState = Number.isSafeInteger(this.options.itemSeed) ? this.options.itemSeed >>> 0 : 0x51a77;
     this.disconnectedIds = new Set();
     const humans = this.options.humanPlayers?.length ? this.options.humanPlayers.slice(0, 8) : [{ id: 'player', name: characterFor(this.options.character).name, character: this.options.character }];
@@ -49,12 +59,15 @@ export class Race {
         color: h ? characterFor(character).color : COLORS[i],
         distance: -(Math.floor(i / 2) * 5.2) || 0, offset: this.mode === 'time-trial' ? 0 : i % 2 ? 2.3 : -2.3,
         speed: 0, lateralVelocity: 0, yaw: 0, yawRate: 0, lap: 1, position: i + 1, boost: 0, driftBoost: 0,
-        driftCharge: 0, isDrifting: false, nitro: 55, coins: 0, spin: 0,
+        driftCharge: 0, driftStage: 0, isDrifting: false, nitro: 55, coins: 0, spin: 0,
+        draftCharge: 0, draftBoost: 0, draftCooldown: 0, drafting: false, draftTargetId: null,
+        personality: ['steady', 'defensive', 'drifter'][i % 3], aiDriftCooldown: 0, stats: newStats(),
+        strategyId: null, strategyLabel: '', strategyActive: false, strategySpeedFactor: 1, strategyRewards: {},
         finished: false, finishTime: null, bestDistance: 0,
         aiSkill: 0.97 + Math.sin(i * 2.67) * 0.035, nextPad: {}, collected: {}, collectedLaps: {}, itemCollected: {},
         recovery: 0, nitroActive: false, collisionCooldown: 0,
         shield: 0, magnet: 0, rocket: 0, inventory: null, itemSlow: 0, itemProtection: 0,
-        itemUseHeld: false, lastItemUseSeq: 0, itemAiDelay: 0, lapTimes: [], lastLapStartedAt: 0,
+        itemUseHeld: false, lastItemUseSeq: 0, itemAiDelay: 0, itemHeldTime: 0, lapTimes: [], lastLapStartedAt: 0,
       };
     });
     this.player = this.racers.find(r => r.id === this.options.localPlayerId) || this.racers[0];
@@ -112,28 +125,118 @@ export class Race {
 
   aiInput(r, index) {
     const char = characterFor(r.character);
-    const lane = Math.sin(r.distance * 0.003 + index * 2) * 2.25;
+    const style = r.personality || 'steady';
+    let lane = Math.sin(r.distance * 0.003 + index * 2) * (style === 'steady' ? 1.35 : 2.25);
+    const near = this.racers.filter(other => other !== r && !other.finished)
+      .map(other => ({ other, delta: this.itemDelta(r, other) }));
+    const follower = near.filter(({ delta }) => delta < -4 && delta > -18).sort((a, b) => b.delta - a.delta)[0]?.other;
+    // Predictable single defensive line, with enough clearance to avoid
+    // weaving into a car already alongside. No position-based speed bonus.
+    if (style === 'defensive' && follower) lane = clamp(follower.offset, -3.2, 3.2);
+    const localDistance = wrap(r.distance, this.track.length);
+    const inStrategyWindow = zone => {
+      const ahead = wrap(zone.start - localDistance, this.track.length);
+      const inside = localDistance >= zone.start && localDistance <= zone.end;
+      return ahead < 45 || inside;
+    };
+    const section = (this.track.strategySections || []).find(inStrategyWindow);
+    if (!section) { r.aiStrategySectionId = null; r.aiStrategyZoneId = null; }
+    else {
+      // Decide before entry and keep the choice through the section, rather
+      // than swerving between replenishing and spending as nitrogen changes.
+      let route = section.choices.find(zone => zone.id === r.aiStrategyZoneId);
+      if (r.aiStrategySectionId !== section.id || !route) {
+        const energy = section.choices.find(zone => zone.nitroRate > 0);
+        const sprint = section.choices.find(zone => zone.nitroRate < 0);
+        const sprintCost = sprint ? -sprint.nitroRate * (sprint.end - sprint.start) / Math.max(18, r.speed) : Infinity;
+        const reserve = style === 'steady' ? 30 : style === 'defensive' ? 18 : 8;
+        route = r.nitro > sprintCost + reserve ? sprint : energy;
+        route ||= section.choices[0];
+        r.aiStrategySectionId = section.id; r.aiStrategyZoneId = route?.id || null;
+      }
+      if (route) lane = route.lane;
+    }
+    // Commit to a clear passing lane until the slow car is behind. Recomputing
+    // a side every frame makes a driver weave back into the same obstruction.
+    let passTarget = near.find(({ other, delta }) => other.id === r.aiPassTargetId && delta > -5 && delta < 38)?.other;
+    if (!passTarget) {
+      r.aiPassTargetId = null;
+      passTarget = near.filter(({ other, delta }) => delta > 0 && delta < Math.max(14, r.speed * .8) &&
+        Math.abs(other.offset - r.offset) < 2.6 && (other.speed < 8 || r.speed - other.speed > 2))
+        .sort((a, b) => a.delta - b.delta)[0]?.other;
+      if (passTarget) {
+        const limit = Math.max(2, this.track.width * .5 - 2);
+        const candidates = [-1, 1].map(side => clamp(passTarget.offset + side * 3.5, -limit, limit))
+          .filter(candidate => Math.abs(candidate - passTarget.offset) >= 2.8 && !near.some(({ other, delta }) =>
+            other !== passTarget && Math.abs(delta) < 8 && Math.abs(other.offset - candidate) < 2.6))
+          .sort((a, b) => Math.abs(a - r.offset) - Math.abs(b - r.offset));
+        if (candidates.length) { r.aiPassTargetId = passTarget.id; r.aiPassLane = candidates[0]; }
+      }
+    }
+    if (r.aiPassTargetId) lane = r.aiPassLane;
     const curvature = curvatureAt(this.track, r.distance + Math.max(3, r.speed * 0.22));
     const previewCurve = Math.max(...[0, 14, 28, 45].map(ahead => Math.abs(curvatureAt(this.track, r.distance + ahead))));
     const desiredYaw = clamp((lane - r.offset) * 0.065 - (r.lateralVelocity || 0) * 0.035, -0.28, 0.28);
     const desiredRate = curvature * r.speed / clamp(1 - curvature * r.offset, 0.6, 1.4) + (desiredYaw - r.yaw) * 2.8;
-    const rateLimit = steeringRate(Math.max(4, r.speed), char.handling);
+    const rateLimit = steeringRate(Math.max(4, r.speed), char.handling, r.isDrifting);
     const steer = clamp(desiredRate / Math.max(0.01, rateLimit), -1, 1);
-    const cornerSpeed = Math.min(36, Math.sqrt(19 / Math.max(0.001, previewCurve)), 1.25 / Math.max(0.001, previewCurve));
+    const cornerSpeed = Math.min(style === 'steady' ? 46 : 50, Math.sqrt((style === 'steady' ? 17 : 19) / Math.max(0.001, previewCurve)), 1.25 / Math.max(0.001, previewCurve));
     const brake = clamp((r.speed - cornerSpeed - 0.5) * 0.09, 0, 0.8);
     const nitro = previewCurve < 0.018 && Math.abs(r.offset) < 5 && r.nitro > 20 && (Math.sin(r.distance * 0.017 + index) > 0.7 || (r.position > 4 && r.nitro > 75));
+    const threat = this.mode === 'items' ? itemThreatFor(this, r) : null;
     const useItem = this.mode === 'items' && !r.finished && r.inventory && !(r.itemAiDelay > 0) && (
-      r.inventory === 'magnet' || r.inventory === 'shield' ||
+      (r.inventory === 'magnet' && (r.itemHeldTime > 2 || (this.track.coins || []).some(c => wrap(c.distance - localDistance, this.track.length) < 100))) ||
+      (r.inventory === 'shield' && !r.shield && (threat || r.speed < 12 || near.some(({ delta }) => Math.abs(delta) < 12) || r.itemHeldTime > 4)) ||
       (r.inventory === 'rocket' && r.speed > 6 && previewCurve < .035) ||
       (r.inventory === 'bubble' && this.racers.some(other => other !== r && !other.finished && this.itemDelta(r, other) > 3 && this.itemDelta(r, other) < 35 && Math.abs(other.offset - r.offset) < 3)) ||
       (r.inventory === 'jelly' && this.racers.some(other => other !== r && !other.finished && this.itemDelta(r, other) < -3 && this.itemDelta(r, other) > -24 && Math.abs(other.offset - r.offset) < 4))
     );
-    return { throttle: 1, brake, steer, drift: false, nitro, useItem: Boolean(useItem), speedLimit: cornerSpeed };
+    const canDrift = style !== 'steady' && !r.aiPassTargetId && !(r.aiDriftCooldown > 0) && r.speed > 18 && brake < .1 &&
+      Math.abs(lane - r.offset) < 2 && Math.abs(r.yaw) < .23 && previewCurve > .006 && previewCurve < .026 && Math.abs(steer) > .17 && Math.abs(steer) < .7;
+    const drift = r.isDrifting ? r.driftCharge < (style === 'drifter' ? .56 : .25) && Math.abs(r.yaw) < .32 && Math.abs(lane - r.offset) < 3 : canDrift;
+    return { throttle: 1, brake, steer, drift, nitro, useItem: Boolean(useItem), speedLimit: cornerSpeed };
+  }
+
+  stepDraft(r, input, dt, prediction) {
+    if (this.mode === 'time-trial' || r.finished) {
+      r.draftBoost = 0; r.draftCooldown = 0; r.draftCharge = 0;
+      r.drafting = false; r.draftTargetId = null;
+      return;
+    }
+    r.draftBoost = Math.max(0, (r.draftBoost || 0) - dt);
+    r.draftCooldown = Math.max(0, (r.draftCooldown || 0) - dt);
+    let target;
+    if (this.mode !== 'time-trial' && !r.finished && !r.offroad && r.speed >= 12 && input.throttle > 0 && !input.brake) {
+      const pose = this.itemPose(r);
+      target = this.racers.filter(other => {
+        const ahead = this.itemDelta(r, other);
+        if (other === r || other.finished || other.speed < 10 || ahead < 5 || ahead > 26 || Math.abs(other.offset - r.offset) > 1.65) return false;
+        const aheadPose = this.itemPose(other);
+        return Math.abs(pose.y - aheadPose.y) < 2.5 && Math.hypot(pose.x - aheadPose.x, pose.z - aheadPose.z) < 29;
+      }).sort((a, b) => this.itemDelta(r, a) - this.itemDelta(r, b))[0];
+    }
+    r.drafting = Boolean(target);
+    if (target && !r.draftCooldown) {
+      if (r.draftTargetId && r.draftTargetId !== target.id) r.draftCharge = 0;
+      r.draftTargetId = target.id;
+      r.draftCharge = Math.min(1, (r.draftCharge || 0) + dt / 1.05);
+      // Prediction may show a charged wake, but only authority can award a
+      // breakthrough. A replay never manufactures rewards or statistics.
+      if (r.draftCharge >= 1 - 1e-9 && !prediction) {
+        r.draftCharge = 0; r.draftBoost = 1.35; r.draftCooldown = 3.2;
+        r.stats.draftBoosts++;
+        if (this.humanIds.has(r.id)) this.emit('draftBoost', '尾流突破！', { racerId: r.id, duration: 1.35 });
+      }
+    } else {
+      r.draftCharge = Math.max(0, (r.draftCharge || 0) - dt * 1.25);
+      if (!r.draftCharge) r.draftTargetId = null;
+    }
   }
 
   stepRacer(r, input, dt, { prediction = false } = {}) {
     const char = characterFor(r.character), human = this.humanIds.has(r.id);
     const before = r.distance, wasDrifting = r.isDrifting;
+    r.stats ||= newStats(); r.strategyRewards ||= {};
     r.boost = Math.max(0, r.boost - dt); r.driftBoost = Math.max(0, r.driftBoost - dt);
     r.spin = Math.max(0, r.spin - dt); r.collisionCooldown = Math.max(0, r.collisionCooldown - dt);
     r.recovery = Math.max(0, r.recovery - dt);
@@ -143,6 +246,8 @@ export class Race {
     r.itemSlow = Math.max(0, (r.itemSlow || 0) - dt);
     r.itemProtection = Math.max(0, (r.itemProtection || 0) - dt);
     if (!prediction) {
+      r.aiDriftCooldown = Math.max(0, (r.aiDriftCooldown || 0) - dt);
+      r.itemHeldTime = r.inventory ? (r.itemHeldTime || 0) + dt : 0;
       r.itemAiDelay = Math.max(0, (r.itemAiDelay || 0) - dt);
       const sequenced = Number.isSafeInteger(input.itemUseSeq) && input.itemUseSeq >= 0;
       const requested = sequenced ? input.itemUseSeq > (r.lastItemUseSeq || 0) : input.useItem && !r.itemUseHeld;
@@ -153,33 +258,71 @@ export class Race {
     const grass = offroadAmount(this.track, r.offset);
     const offroad = grass > 0.65;
     r.offroad = offroad;
+    const strategy = !r.finished ? this.track.strategyAt?.(r.distance, r.offset) : null;
+    const strategyRate = clamp(finite(strategy?.nitroRate), -20, 12);
+    const affordable = strategyRate >= 0 || r.nitro >= -strategyRate * dt;
+    const strategySpeed = affordable ? clamp(finite(strategy?.speedFactor, 1), .8, 1.12) : 1;
+    r.strategyId = strategy?.id || null; r.strategyLabel = strategy?.label || '';
+    // Keep the HUD aligned with this actual physics step. A nonzero remainder
+    // can still be too small to fund the line's next acceleration step.
+    r.strategyActive = Boolean(strategy && affordable);
+    r.strategySpeedFactor = strategySpeed;
+    if (strategy && affordable) {
+      r.nitro = clamp(r.nitro + strategyRate * dt, 0, 100);
+      const lap = Math.floor(Math.max(0, r.distance) / this.track.length);
+      if (strategy.boost > 0 && r.strategyRewards[strategy.id] !== lap) {
+        r.strategyRewards[strategy.id] = lap;
+        r.boost = Math.max(r.boost, Math.min(.6, strategy.boost));
+        if (!prediction && human) this.emit('route', strategy.label, { racerId: r.id, strategyId: strategy.id });
+      }
+    }
     r.isDrifting = input.drift && Math.abs(input.steer) > 0.15 && r.speed > 11 && !offroad && !r.finished;
     if (r.isDrifting) {
-      r.driftCharge = Math.min(1, r.driftCharge + dt * (0.47 + Math.abs(input.steer) * 0.2));
-      if (!wasDrifting && human) this.emit('drift', '漂移蓄力', { racerId: r.id });
-    } else if (wasDrifting) {
-      if (r.driftCharge >= 0.24) {
-        const charge = r.driftCharge;
-        r.boost = Math.max(r.boost, 0.55 + charge * 1.35);
-        r.driftBoost = r.boost;
-        r.nitro = Math.min(100, r.nitro + 12 + charge * 24);
-        if (human) this.emit('driftBoost', charge > 0.8 ? '完美漂移！氮气 +36' : '漂移加速！', { racerId: r.id, charge });
+      const priorStage = driftStageFor(r.driftCharge);
+      r.driftCharge = Math.min(1, r.driftCharge + dt * (0.47 + Math.abs(input.steer) * 0.2) * clamp(finite(strategy?.driftChargeFactor, 1), 1, 1.16));
+      const stage = driftStageFor(r.driftCharge);
+      if (!prediction) {
+        r.stats.bestDrift = Math.max(r.stats.bestDrift, r.driftCharge);
+        if (!wasDrifting && human) this.emit('drift', '漂移蓄力', { racerId: r.id });
+        if (stage > priorStage && human) this.emit('driftStage', `${DRIFT_STAGES[stage - 1].label}就绪`, { racerId: r.id, stage });
       }
+    } else if (wasDrifting) {
+      const stage = driftStageFor(r.driftCharge), reward = DRIFT_STAGES[stage - 1];
+      if (reward && !offroad && !r.finished) {
+        const charge = r.driftCharge;
+        r.boost = Math.max(r.boost, reward.duration);
+        r.driftBoost = r.boost;
+        r.nitro = Math.min(100, r.nitro + reward.nitro);
+        if (!prediction) {
+          r.stats.bestDrift = Math.max(r.stats.bestDrift, charge); r.stats.driftBoosts++;
+          if (human) this.emit('driftBoost', `${reward.label}加速！氮气 +${reward.nitro}`, { racerId: r.id, charge, stage, duration: reward.duration });
+        }
+      }
+      r.aiDriftCooldown = 2.8;
       r.driftCharge = 0;
     } else r.driftCharge = Math.max(0, r.driftCharge - dt * 0.5);
+    r.driftStage = driftStageFor(r.driftCharge);
+    this.stepDraft(r, input, dt, prediction);
 
     r.nitroActive = input.nitro && r.nitro > 0 && r.speed > 5 && !offroad && !r.finished;
     if (r.nitroActive) r.nitro = Math.max(0, r.nitro - dt * 24 / char.nitro);
-    const boosted = r.nitroActive || r.boost > 0 || r.rocket > 0;
+    const boosted = r.nitroActive || r.boost > 0 || r.rocket > 0 || r.draftBoost > 0;
     const aiFactor = human ? 1 : (DIFFICULTIES[this.options.difficulty] || DIFFICULTIES.normal) * r.aiSkill;
     let maxSpeed = 34 * char.speed * aiFactor;
-    if (boosted) maxSpeed += r.rocket > 0 ? 16 : 12;
+    if (boosted) maxSpeed += r.rocket > 0 ? 16 : r.nitroActive || r.boost > 0 ? 12 : 7;
+    maxSpeed *= strategySpeed;
     maxSpeed *= 1 - grass * 0.45;
     if (r.spin) maxSpeed *= 0.55;
     if (r.itemSlow > 0) maxSpeed *= ITEM_RULES.speedFactor;
     if (Number.isFinite(input.speedLimit)) maxSpeed = Math.min(maxSpeed, input.speedLimit);
     const motion = stepKartPhysics(r, input, this.track, dt, { maxSpeed, acceleration: r.rocket > 0 ? 30 : boosted ? 18 : 12.5, handling: char.handling });
-    if (motion.railImpact > 1 && !r.recovery && human && !prediction) { this.emit(r.shield > 0 ? 'shieldBlock' : 'bump', r.shield > 0 ? '泡泡护盾挡住擦碰！' : '擦碰护栏，松开转向驶回赛道', { racerId: r.id, impact: motion.railImpact }); r.recovery = 1.2; }
+    if (motion.railImpact > 0 && !prediction && !r.finished) {
+      r.stats.clean = false;
+      if (!r.recovery) {
+        r.stats.wallHits++; r.recovery = 1.2;
+        if (human && motion.railImpact > 1) this.emit(r.shield > 0 ? 'shieldBlock' : 'bump', r.shield > 0 ? '泡泡护盾挡住擦碰！' : '擦碰护栏，松开转向驶回赛道', { racerId: r.id, impact: motion.railImpact, surface: 'rail' });
+      }
+    }
     const oldLap = r.lap;
     if (!prediction) {
       r.bestDistance = Math.max(r.bestDistance, r.distance);
@@ -212,8 +355,9 @@ export class Race {
     for (const box of prediction || r.finished || this.mode !== 'items' || r.inventory ? [] : this.itemBoxes) {
       const lap = Math.floor((r.distance - box.distance) / this.track.length);
       if ((!ITEMS[box.type] && box.type !== 'random') || !this.crossed(before, r.distance, box.distance) || Math.abs(r.offset - box.lane) >= 2.6 || lap < 0 || lap >= this.laps || r.itemCollected[box.id] >= lap) continue;
-      const type = ITEMS[box.type] ? box.type : chooseItem(r.position, this.racers.length, () => this.itemRandom());
-      r.itemCollected[box.id] = lap; r.inventory = type; r.itemAiDelay = .55;
+      const gapToLeader = Math.max(0, ...this.racers.map(other => other.distance - r.distance));
+      const type = ITEMS[box.type] ? box.type : chooseItem(r.position, this.racers.length, () => this.itemRandom(), gapToLeader);
+      r.itemCollected[box.id] = lap; r.inventory = type; r.itemAiDelay = .55; r.itemHeldTime = 0;
       if (human) this.emit('item', `获得${ITEMS[type].name}，按道具键使用`, { racerId: r.id, itemId: box.id, itemType: type, lap, duration: ITEMS[type].duration });
       break;
     }
@@ -247,8 +391,9 @@ export class Race {
 
   clearRacerItems(r) {
     r.inventory = null;
-    for (const key of ['shield', 'magnet', 'rocket', 'itemSlow', 'itemProtection', 'boost', 'driftBoost']) r[key] = 0;
-    r.nitroActive = false;
+    for (const key of ['shield', 'magnet', 'rocket', 'itemSlow', 'itemProtection', 'boost', 'driftBoost', 'draftCharge', 'draftBoost', 'draftCooldown', 'driftCharge', 'driftStage']) r[key] = 0;
+    r.nitroActive = false; r.drafting = false; r.isDrifting = false; r.draftTargetId = null;
+    r.strategyId = null; r.strategyLabel = ''; r.strategyActive = false; r.strategySpeedFactor = 1;
   }
 
   guideBubble(object, dt) {
@@ -283,16 +428,22 @@ export class Race {
   hitWithItem(r, object) {
     if (this.mode !== 'items' || r.finished || r.id === object.ownerId || r.itemProtection > 0) return false;
     r.itemProtection = ITEM_RULES.protectionDuration;
+    const source = this.racers.find(other => other.id === object.ownerId);
+    r.stats ||= newStats();
     if (r.shield > 0) {
       r.shield = 0;
-      this.emit('shieldBlock', '泡泡护盾挡住了道具！', { racerId: r.id, sourceId: object.ownerId, itemType: object.type, objectId: object.id });
+      r.stats.blocks++;
+      this.emit('shieldBlock', '泡泡护盾挡住了道具！', { racerId: r.id, sourceId: object.ownerId, targetId: r.id, itemType: object.type, objectId: object.id });
+      if (source) this.emit('itemConfirm', `${r.name}用护盾挡住了攻击`, { racerId: source.id, sourceId: source.id, targetId: r.id, outcome: 'blocked', itemType: object.type, objectId: object.id });
       return true;
     }
     // One bounded speed reduction. Steering, drift and orientation remain in
     // the driver's control; subsequent protected hits do not compound it.
     r.speed = Math.max(0, r.speed * ITEM_RULES.speedFactor);
     r.itemSlow = ITEM_RULES.slowDuration;
-    this.emit('itemHit', '被道具击中，短暂减速', { racerId: r.id, sourceId: object.ownerId, itemType: object.type, objectId: object.id, duration: ITEM_RULES.slowDuration });
+    if (source) { source.stats ||= newStats(); source.stats.itemHits++; }
+    this.emit('itemHit', '被道具击中，短暂减速', { racerId: r.id, sourceId: object.ownerId, targetId: r.id, itemType: object.type, objectId: object.id, duration: ITEM_RULES.slowDuration });
+    if (source) this.emit('itemConfirm', `命中${r.name}！`, { racerId: source.id, sourceId: source.id, targetId: r.id, outcome: 'hit', itemType: object.type, objectId: object.id });
     return true;
   }
 
@@ -327,9 +478,14 @@ export class Race {
   collisions() {
     const protectedSpeeds = new Map(this.racers.filter(r => r.shield > 0).map(r => [r.id, r.speed]));
     for (const { a, b, impact } of solveKartCollisions(this.racers, this.track)) {
-      if (impact < 0.6 || (a.collisionCooldown && b.collisionCooldown)) continue;
+      for (const r of [a, b]) {
+        r.stats ||= newStats();
+        if (!r.collisionCooldown) r.stats.collisions++;
+        r.stats.clean = false;
+      }
+      const audible = impact >= .6 && !(a.collisionCooldown && b.collisionCooldown);
       a.collisionCooldown = 0.55; b.collisionCooldown = 0.55;
-      for (const r of [a, b]) if (this.humanIds.has(r.id)) this.emit(r.shield > 0 ? 'shieldBlock' : 'bump', r.shield > 0 ? '泡泡护盾挡住碰撞！' : '轻微碰撞', { racerId: r.id, impact });
+      for (const r of [a, b]) if (audible && this.humanIds.has(r.id)) this.emit(r.shield > 0 ? 'shieldBlock' : 'bump', r.shield > 0 ? '泡泡护盾挡住碰撞！' : '轻微碰撞', { racerId: r.id, impact });
     }
     // The bubble keeps 85% of momentum otherwise lost to contact. It never
     // exceeds the protected car's approach speed or increases its lateral kick.
@@ -342,6 +498,23 @@ export class Race {
       if (a.finished !== b.finished) return a.finished ? -1 : 1;
       return b.distance - a.distance;
     });
+    // Hysteresis counts an actual pass from two metres behind to two metres
+    // ahead, rather than awarding a new overtake every time cars touch noses.
+    // Authority only calls rank; input prediction never increments statistics.
+    if (this.phase === 'racing' && this.elapsed > 4 && this.mode !== 'time-trial') {
+      for (let i = 0; i < this.racers.length; i++) for (let j = i + 1; j < this.racers.length; j++) {
+        const a = this.racers[i], b = this.racers[j];
+        if (a.finished || b.finished) continue;
+        const gap = a.distance - b.distance;
+        if (Math.abs(gap) <= 2) continue;
+        const key = `${a.id}:${b.id}`, sign = Math.sign(gap), previous = this.passStates[key];
+        if (previous !== undefined && previous !== sign) {
+          const passing = sign > 0 ? a : b;
+          passing.stats ||= newStats(); passing.stats.overtakes++;
+        }
+        this.passStates[key] = sign;
+      }
+    }
     sorted.forEach((r, i) => { r.position = i + 1; });
     return sorted;
   }
@@ -349,7 +522,7 @@ export class Race {
     this.phase = 'finished';
     for (const racer of this.racers) this.clearRacerItems(racer);
     this.itemObjects = [];
-    this.results = this.rank().map(r => ({ id: r.id, name: r.name, character: r.character, color: r.color, position: r.position, finishTime: r.finishTime, finished: r.finished, distance: r.distance, coins: r.coins }));
+    this.results = this.rank().map(r => ({ id: r.id, name: r.name, character: r.character, color: r.color, position: r.position, finishTime: r.finishTime, finished: r.finished, distance: r.distance, coins: r.coins, personality: r.personality, stats: { ...r.stats } }));
     this.finishTime = this.player.finishTime;
     this.emit('results', '比赛结束');
   }
@@ -360,7 +533,7 @@ export class Race {
       itemRandomState: this.itemRandomState, nextItemObjectId: this.nextItemObjectId,
       phase: this.phase, countdown: this.countdown, elapsed: this.elapsed, laps: this.laps,
       finishTime: this.finishTime, results: this.results, playerId: this.player.id,
-      humanIds: [...this.humanIds], racers: this.racers.map(r => ({ ...r, nextPad: undefined, collected: { ...r.collected }, collectedLaps: { ...r.collectedLaps }, itemCollected: { ...r.itemCollected }, lapTimes: [...r.lapTimes] })),
+      humanIds: [...this.humanIds], racers: this.racers.map(r => ({ ...r, nextPad: undefined, stats: { ...r.stats }, strategyRewards: { ...r.strategyRewards }, collected: { ...r.collected }, collectedLaps: { ...r.collectedLaps }, itemCollected: { ...r.itemCollected }, lapTimes: [...r.lapTimes] })),
       events: this.consumeEvents(),
     };
   }
@@ -372,6 +545,9 @@ export class Race {
     if (Number.isSafeInteger(state.itemRandomState)) this.itemRandomState = state.itemRandomState >>> 0;
     if (Number.isSafeInteger(state.nextItemObjectId)) this.nextItemObjectId = state.nextItemObjectId;
     this.racers = state.racers.map(r => ({ ...r, inventory: this.mode === 'items' && ITEMS[r.inventory] ? r.inventory : null,
+      stats: { ...newStats(), ...r.stats }, strategyRewards: { ...r.strategyRewards },
+      strategyActive: Boolean(r.strategyActive), strategySpeedFactor: clamp(finite(r.strategySpeedFactor, 1), .8, 1.12),
+      driftStage: driftStageFor(r.driftCharge || 0), draftCharge: r.draftCharge || 0, draftBoost: r.draftBoost || 0, draftCooldown: r.draftCooldown || 0,
       itemSlow: r.itemSlow || 0, itemProtection: r.itemProtection || 0, lastItemUseSeq: r.lastItemUseSeq || 0, itemUseHeld: Boolean(r.itemUseHeld),
       collected: { ...r.collected }, collectedLaps: { ...r.collectedLaps }, itemCollected: { ...r.itemCollected }, lapTimes: [...(r.lapTimes || [])] }));
     for (const racer of this.racers) if (racer.finished || this.phase === 'finished') this.clearRacerItems(racer);

@@ -7,6 +7,7 @@ import { AdaptiveQuality } from './performance.js';
 import { isPickupCollected } from './game/items.js';
 import { createTerrainSampler, MAP_LAYOUT } from './game/map-layout.js';
 import { viewportProfile, cameraFov, chaseFraming, chaseEye } from './viewport.js';
+import { normalizeCosmetics, kartSparkColor } from './kart-effects.js';
 
 const PALETTE = [0xf59e42, 0x41bfa2, 0x9982df, 0xf4ce51, 0xef718c, 0x54b4df, 0xdba16b, 0x7bbd66];
 const THEMES = {
@@ -27,7 +28,7 @@ function box(parent,x,y,z,sx,sy,sz,material) {return mesh(new THREE.BoxGeometry(
 function label(text, bg='#fff8dc', fg='#143e49', width=512, height=128) {
   const c=document.createElement('canvas');c.width=width;c.height=height;
   const ctx=c.getContext('2d');ctx.fillStyle=bg;ctx.fillRect(0,0,width,height);
-  ctx.fillStyle=fg;ctx.font=`900 ${height*.57}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,width/2,height*.53);
+  ctx.fillStyle=fg;ctx.font=`900 ${height*.57}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,width/2,height*.53,width*.94);
   const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
   return new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide});
 }
@@ -91,7 +92,8 @@ export class World {
     sun.shadow.normalBias=.055;sun.shadow.bias=-.0002;this.scene.add(sun);this.scene.add(sun.target);this.sun=sun;
     this.materials={grass:mat(0x83c56b),road:mat(0x627178),white:mat(0xfff7dd),red:mat(0xf28364),sand:mat(0xf1dfaa),dark:mat(0x203e49),trunk:mat(0x9f7760),leaf:mat(0x52aa64),leaf2:mat(0x91ca69),yellow:mat(0xffdf69),teal:mat(0x46bba9)};
     for(const [key,color] of Object.entries(this.theme.colors))this.materials[key].color.setHex(color);
-    this.buildIsland();this.buildRoad();this.buildBridge();this.buildScenery();this.buildStart();this.buildPickups();
+    this.cosmeticsById=new Map();this.localCosmetics=normalizeCosmetics();
+    this.buildIsland();this.buildRoad();this.buildStrategyLines();this.buildBridge();this.buildScenery();this.buildStart();this.buildPickups();
     this.resize();const start=this.track.sample(0);this.camera.position.set(start.x+start.tx*8.5+start.nx*8,start.y+5.4,start.z+start.tz*8.5+start.nz*8);this.camera.lookAt(start.x,start.y+1.2,start.z);
     this.queueResize=()=>{if(this.disposed||this.resizeRequest)return;this.resizeRequest=requestAnimationFrame(()=>{this.resizeRequest=0;if(!this.disposed)this.resize();});};
     window.addEventListener('resize',this.queueResize);window.addEventListener('orientationchange',this.queueResize);
@@ -152,6 +154,33 @@ export class World {
     for(const d of this.track.boostPads??[]){const p=this.track.sample(d.distance);const group=new THREE.Group();group.position.set(p.x+p.nx*d.lane,p.y+.05,p.z+p.nz*d.lane);group.rotation.y=p.heading;this.scene.add(group);
       group.rotation.x=-p.pitch;group.rotation.order='YXZ';box(group,0,0,0,3.8,.045,5.5,this.materials.teal);
       for(let i=-1;i<=1;i++){for(const s of [-1,1]){const b=box(group,s*.52,.035,i*1.45,.28,.04,1.5,this.materials.yellow);b.rotation.y=s*-.72;}}
+    }
+  }
+  buildStrategyLines(){
+    const zones=this.track.strategyZones??[];
+    if(!zones.length)return;
+    this.strategyRibbons=[];
+    const arrows={energy:[],sprint:[]},materials={};
+    for(const zone of zones){
+      materials[zone.kind]??=new THREE.MeshBasicMaterial({color:zone.color,transparent:true,opacity:.48,depthWrite:false,side:THREE.DoubleSide});
+      for(const segment of zone.segments??[{start:zone.start,end:zone.end}]){
+        const ribbon=this.ribbon(zone.lane-zone.halfWidth,zone.lane+zone.halfWidth,.052,materials[zone.kind],segment.start,segment.end);
+        ribbon.castShadow=false;ribbon.receiveShadow=false;ribbon.name=`strategy-${zone.id}`;this.strategyRibbons.push(ribbon);
+        for(let d=segment.start+3;d<segment.end-2;d+=9){
+          const p=this.track.sample(d);
+          for(const side of [-1,1])arrows[zone.kind].push({x:p.x+p.nx*(zone.lane+side*.34),y:p.y+.073,z:p.z+p.nz*(zone.lane+side*.34),ry:p.heading-side*.7,rx:-p.pitch,sx:.15,sy:.025,sz:1.05});
+        }
+      }
+    }
+    for(const kind of ['energy','sprint'])this.instances(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:kind==='energy'?0xeafff4:0xfff4d7}),arrows[kind],false);
+    for(const section of this.track.strategySections??[]){
+      const p=this.track.sample(section.start-12);
+      for(const zone of section.choices){
+        const side=Math.sign(zone.lane),g=new THREE.Group();g.name=`strategy-sign-${zone.id}`;g.position.set(p.x+p.nx*side*10.4,p.y,p.z+p.nz*side*10.4);g.rotation.y=p.heading;this.scene.add(g);
+        box(g,0,1.8,0,.15,3.6,.15,this.materials.dark);
+        const text=`${zone.label} · ${zone.kind==='energy'?'略慢':section.kind==='finale'?'高耗氮':'耗氮'}`;
+        const sign=mesh(new THREE.PlaneGeometry(7.2,1.55),label(text,zone.color,'#173f49',768,160),0,3.5,0,g);sign.rotation.y=Math.PI;sign.castShadow=false;sign.receiveShadow=false;
+      }
     }
   }
   instances(geometry,material,items,shadows=true){
@@ -367,7 +396,10 @@ export class World {
     }
     this.pickupPhase=race.phase;
     if(this.itemRace!==race){
-      for(const c of this.itemVisuals){this.scene.remove(c.mesh);releaseResources([c.mesh]);}
+      // Boxes share their geometry. Release the group once rather than
+      // repeatedly disposing the same buffer for every box on a rematch.
+      releaseResources(this.itemVisuals.map(c=>c.mesh));
+      for(const c of this.itemVisuals)this.scene.remove(c.mesh);
       this.itemVisuals=[];this.itemRace=race;
       if(race.itemBoxes?.length)this.buildItemBoxes(race.itemBoxes);
     }
@@ -414,12 +446,26 @@ export class World {
         const model=(this.models[r.character]??this.models.fox).clone(true),wheels=[],owned={geometries:new Set(),materials:new Set(),textures:new Set()};
         model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;const recolor=material=>{if(material?.name!=='KartPaint')return material;const paint=material.clone();paint.color.set(r.color??PALETTE[i]);owned.materials.add(paint);return paint;};o.material=Array.isArray(o.material)?o.material.map(recolor):recolor(o.material);}if(o.name.startsWith('Wheel')&&o.isGroup)wheels.push(o);});
         k.root.remove(k.group);for(const geometry of k.owned.geometries)geometry.dispose();for(const material of k.owned.materials)material.dispose();
-        k.root.add(model);k.group=model;k.wheels=wheels;k.owned=owned;k.character=r.character;k.color=r.color;
+        k.root.add(model);k.group=model;k.wheels=wheels;k.owned=owned;k.character=r.character;k.color=r.color;k.appliedPaint=undefined;
       }
       k.lastDistance=r.distance;
     }
   }
   setCharacter(character){const color={fox:0x43b9bb,rabbit:0x88c58d,panda:0x9d88d3}[character]??0x43b9bb;this.karts[0]?.group.traverse(o=>{if(o.isMesh&&o.material?.name==='KartPaint')o.material.color.setHex(color);});}
+  setCosmetics(value={},racerId=null){
+    if(this.disposed)return;
+    const cosmetics=normalizeCosmetics(value);
+    if(racerId)this.cosmeticsById.set(racerId,cosmetics);else this.localCosmetics=cosmetics;
+    for(let i=0;i<this.karts.length;i++){
+      const r=this.lineup?.[i];if(!r)continue;
+      if(racerId?r.id===racerId:r.id===(this.localPlayerId??this.lineup[0]?.id))this.applyKartPaint(this.karts[i],r,cosmetics);
+    }
+  }
+  applyKartPaint(k,r,cosmetics){
+    const color=cosmetics?.paint??r.color??'#42bbbd';
+    if(k.appliedPaint===color)return;k.appliedPaint=color;
+    k.group.traverse(o=>{if(!o.isMesh)return;for(const material of Array.isArray(o.material)?o.material:[o.material])if(material?.name==='KartPaint'||material===k.paint)material.color.set(color);});
+  }
   update(dt,race,menu=false,rawFrameMs=dt*1000){
     if(this.disposed)return;
     const qualityChanged=!document.hidden&&this.adaptive.sample(rawFrameMs/1000);
@@ -427,19 +473,39 @@ export class World {
     this.time+=dt;for(const rotor of this.windmills)rotor.rotation.z+=dt*.35;
     this.itemObjectView?.update(race,this.time,menu);
     this.updatePickups(dt,race,menu);
+    this.localPlayerId=race.player?.id;
+    const cameraPlayer=race.cameraPlayer??race.player;
+    if(!menu&&this.cameraPlayerId!==cameraPlayer?.id){this.cameraPlayerId=cameraPlayer?.id;this.resetChase=true;}
     for(let i=0;i<this.karts.length;i++){const k=this.karts[i],r=race.racers[i];k.root.visible=Boolean(r);if(!r)continue;const p=this.track.sample(r.distance),offset=r.offset??0;
       const target=this.scratch.target.set(p.x+p.nx*offset,p.y+.08,p.z+p.nz*offset);
-      if(!k.placed||Math.abs(r.distance-(k.lastDistance??r.distance))>20){k.root.position.copy(target);k.placed=true;}else k.root.position.lerp(target,1-Math.exp(-dt*24));
+      // Input prediction already smooths corrections. Adding another visual
+      // interpolation to our own kart would delay its response to steering.
+      if(!k.placed||(!menu&&r.id===this.localPlayerId)||Math.abs(r.distance-(k.lastDistance??r.distance))>20){k.root.position.copy(target);k.placed=true;}else k.root.position.lerp(target,1-Math.exp(-dt*24));
       k.lastDistance=r.distance;k.root.rotation.set(-p.pitch,p.heading+(r.yaw??0),0,'YXZ');k.group.rotation.z=THREE.MathUtils.damp(k.group.rotation.z,(r.isDrifting?-.12:0)*Math.sign(r.yaw||1),8,dt);for(const w of k.wheels)w.rotation.x+=(r.speed??0)*dt*2;
+      const cosmetics=this.cosmeticsById.get(r.id)??(r.id===this.localPlayerId?this.localCosmetics:null);this.applyKartPaint(k,r,cosmetics);
       if(!k.effects){
-        this.effectAssets??={shieldGeometry:new THREE.SphereGeometry(2.05,16,10),magnetGeometry:new THREE.TorusGeometry(2,.06,5,28),shieldMaterial:new THREE.MeshBasicMaterial({color:0x7fdfff,transparent:true,opacity:.2,depthWrite:false}),magnetMaterial:new THREE.MeshBasicMaterial({color:0xff9ed9,transparent:true,opacity:.65})};
+        this.effectAssets??={shieldGeometry:new THREE.SphereGeometry(2.05,16,10),magnetGeometry:new THREE.TorusGeometry(2,.06,5,28),ringGeometry:new THREE.TorusGeometry(1.6,.055,5,24),stickerGeometry:starGeometry(),stickerMaterial:new THREE.MeshBasicMaterial({color:0xffdf69}),shieldMaterial:new THREE.MeshBasicMaterial({color:0x7fdfff,transparent:true,opacity:.2,depthWrite:false}),magnetMaterial:new THREE.MeshBasicMaterial({color:0xff9ed9,transparent:true,opacity:.65}),shieldRimMaterial:new THREE.MeshBasicMaterial({color:0xb9f7ff,transparent:true,opacity:.8,depthWrite:false}),protectionMaterial:new THREE.MeshBasicMaterial({color:0xffe6a2,transparent:true,opacity:.85,depthWrite:false}),draftMaterial:new THREE.MeshBasicMaterial({color:0x97efff,transparent:true,opacity:.7,depthWrite:false})};
         const shield=mesh(this.effectAssets.shieldGeometry,this.effectAssets.shieldMaterial,0,1.2,0,k.root);shield.scale.y=.8;shield.castShadow=false;
         const magnet=mesh(this.effectAssets.magnetGeometry,this.effectAssets.magnetMaterial,0,.4,0,k.root);magnet.rotation.x=Math.PI/2;magnet.castShadow=false;
-        k.effects={shield,magnet};
+        const shieldRim=mesh(this.effectAssets.ringGeometry,this.effectAssets.shieldRimMaterial,0,1.2,0,k.root);shieldRim.scale.setScalar(1.27);shieldRim.castShadow=false;
+        const protection=mesh(this.effectAssets.ringGeometry,this.effectAssets.protectionMaterial,0,.65,0,k.root);protection.rotation.x=Math.PI/2;protection.castShadow=false;
+        const draft=mesh(this.effectAssets.ringGeometry,this.effectAssets.draftMaterial,0,.5,-2.1,k.root);draft.rotation.x=Math.PI/2;draft.castShadow=false;
+        const sticker=mesh(this.effectAssets.stickerGeometry,this.effectAssets.stickerMaterial,0,.78,-1.46,k.root);sticker.rotation.y=Math.PI;sticker.scale.setScalar(.22);sticker.castShadow=false;sticker.receiveShadow=false;sticker.name='cup-star-sticker';
+        k.effects={shield,magnet,shieldRim,protection,draft,sticker};
       }
-      k.effects.shield.visible=!menu&&r.shield>0;k.effects.magnet.visible=!menu&&r.magnet>0;
+      k.effects.sticker.visible=cosmetics?.title==='晴空杯车手';
+      k.effects.shield.visible=!menu&&r.shield>0&&(r.shield>1.2||Math.sin(this.time*12)>-.25);k.effects.magnet.visible=!menu&&r.magnet>0;
+      k.effects.shieldRim.visible=k.effects.shield.visible;k.effects.shieldRim.rotation.y=this.time*.8;
+      k.effects.protection.visible=!menu&&r.itemProtection>0;k.effects.protection.rotation.z=this.time*2;k.effects.protection.scale.setScalar(1+Math.sin(this.time*10)*.06);
+      k.effects.draft.visible=!menu&&(r.draftCharge>0||r.draftBoost>0);const draftScale=r.draftBoost>0?1.55+Math.sin(this.time*16)*.08:1+(r.draftCharge??0)*.45;k.effects.draft.scale.set(draftScale,draftScale*1.3,1);
       const pulse=1+Math.sin(this.time*5)*.025;k.effects.shield.scale.set(pulse,pulse*.8,pulse);k.effects.magnet.rotation.z+=dt*2;
-      if(!menu&&(r.boost>0||r.isDrifting||r.nitroActive||r.rocket>0)&&Math.random()<.7)this.spark(k.root.position,r.rocket>0?0xff995f:r.nitroActive?0x6eeaff:r.boost>0?0xffdd62:0x64d8ff,p,r.isDrifting);
+      const feedbackActive=!menu&&(r.boost>0||r.isDrifting||r.nitroActive||r.rocket>0||r.draftBoost>0);
+      const local=r.id===this.localPlayerId,limited=this.graphicsQuality==='smooth'||(this.graphicsQuality==='auto'&&this.adaptive.level>0);
+      const playerPose=race.player&&this.karts[race.racers.indexOf(race.player)]?.root.position;
+      const nearby=local||!playerPose||k.root.position.distanceToSquared(playerPose)<120*120;
+      // Time-based emission keeps the drift readable at both 30 and 60 FPS.
+      k.sparkClock=feedbackActive&&nearby?(k.sparkClock??0)+Math.min(dt,.1)*(local?(limited?24:36):(limited?10:18)):0;
+      if(k.sparkClock>=1){const count=Math.min(2,Math.floor(k.sparkClock));k.sparkClock%=1;for(let j=0;j<count;j++)this.spark(k.root.position,kartSparkColor(r,cosmetics??{}),p,r.isDrifting);}
     }
     for(let i=this.particles.length-1;i>=0;i--){const a=this.particles[i];a.life-=dt;a.mesh.position.addScaledVector(a.velocity,dt);if(a.absorb){const kart=this.karts[race.racers.indexOf(race.player)]?.root;if(kart)a.mesh.position.lerp(kart.position,Math.min(1,dt*9));}a.mesh.scale.setScalar(Math.max(.01,a.life*(a.absorb?1.8:1.1)));if(a.life<=0){a.mesh.visible=false;this.particles.splice(i,1);this.particlePool.push(a);}}
     const overview=menu&&this.overview,overviewFit=overview?Math.max(1,1.15/this.camera.aspect):1;this.scene.fog.near=overview?1100*overviewFit:330;this.scene.fog.far=overview?2700*overviewFit:1250;this.camera.near=overview?5:.2;this.camera.far=overview?2400*overviewFit:1900;
@@ -450,10 +516,10 @@ export class World {
       const eye=this.scratch.eye.set(hero.x+p.tx*8.5+p.nx*(8+Math.sin(t)*.8),hero.y+5.4,hero.z+p.tz*8.5+p.nz*(8+Math.sin(t)*.8));
       const screenRight=this.scratch.right.set(eye.z-hero.z,0,hero.x-eye.x).normalize();const focus=this.scratch.focus.copy(hero);focus.y+=1.2;focus.addScaledVector(screenRight,this.camera.aspect>1.3?-3.9:0);
       this.camera.position.lerp(eye,1-Math.exp(-dt*3));this.camera.lookAt(focus);this.camera.fov=cameraFov(48,this.camera.aspect);
-    }else{const r=race.player,framing=chaseFraming(this.viewport,r.speed),ahead=this.track.sample(r.distance+framing.ahead),eye=chaseEye(this.track,r.distance,r.offset,framing),back=this.scratch.eye.set(eye.x,eye.y,eye.z),snap=framing.relativeToPlayer&&(this.wasMenu||this.resetChase);
+    }else{const r=cameraPlayer,framing=chaseFraming(this.viewport,r.speed),ahead=this.track.sample(r.distance+framing.ahead),eye=chaseEye(this.track,r.distance,r.offset,framing),back=this.scratch.eye.set(eye.x,eye.y,eye.z),snap=this.resetChase||(framing.relativeToPlayer&&this.wasMenu);
       if(snap)this.camera.position.copy(back);else this.camera.position.lerp(back,1-Math.exp(-dt*6));this.camera.lookAt(ahead.x+ahead.nx*r.offset*.65,ahead.y+framing.targetHeight,ahead.z+ahead.nz*r.offset*.65);const targetFov=cameraFov(53+(r.speed??0)*.17,this.camera.aspect);this.camera.fov=snap?targetFov:THREE.MathUtils.damp(this.camera.fov,targetFov,4,dt);this.resetChase=false;
     }
-    const focus=menu?this.karts[0]?.root.position:this.karts[race.racers.indexOf(race.player)]?.root.position;
+    const focus=menu?this.karts[0]?.root.position:this.karts[race.racers.findIndex(r=>r.id===cameraPlayer?.id)]?.root.position;
     if(focus){this.sun.target.position.copy(focus);this.sun.position.set(focus.x-80,focus.y+145,focus.z-65);this.sun.target.updateMatrixWorld();}
     this.wasMenu=menu;this.camera.updateProjectionMatrix();this.renderer.render(this.scene,this.camera);
     this.frameStats={quality:this.graphicsQuality,frameMs:rawFrameMs,averageMs:this.adaptive.averageMs,qualityLevel:this.adaptive.level,particles:this.particles.length,particleObjects:this.particles.length+this.particlePool.length,drawCalls:this.renderer.info?.render?.calls??null,triangles:this.renderer.info?.render?.triangles??null,modelLoads:this.modelCache.loads};
@@ -463,7 +529,7 @@ export class World {
     this.particles.length=0;
   }
   particle(position,color,velocity,life,absorb=false){
-    const limit=this.graphicsQuality==='auto'?this.adaptive.particleLimit:112;
+    const limit=this.graphicsQuality==='auto'?this.adaptive.particleLimit:this.graphicsQuality==='smooth'?32:112;
     if(this.particles.length>=limit)return;
     let a=this.particlePool.pop();
     if(!a){
@@ -474,7 +540,8 @@ export class World {
     a.mesh.visible=true;a.mesh.position.copy(position);a.mesh.material.color.setHex(color);a.mesh.scale.setScalar(1);a.velocity.copy(velocity);a.life=life;a.absorb=absorb;this.particles.push(a);
   }
   spark(position,color,p,drift){
-    this.scratch.focus.set(position.x-p.tx*1.3,position.y+.35,position.z-p.tz*1.3);
+    const side=drift?(Math.random()<.5?-1:1):0;
+    this.scratch.focus.set(position.x-p.tx*1.3+(p.nx??p.tz)*side,position.y+(drift ? .15 : .35),position.z-p.tz*1.3+(p.nz??-p.tx)*side);
     this.scratch.right.set((Math.random()-.5)*3-p.tx*3,Math.random()*2,-p.tz*3+(Math.random()-.5)*3);
     this.particle(this.scratch.focus,color,this.scratch.right,.35+Math.random()*.25);
   }
@@ -492,7 +559,9 @@ export class World {
     if(!this.ghost){
       this.ghostCharacter=pose.character??'fox';
       const visual=this.fallbackKart(0x92edff,pose.character??'fox');this.ghost=visual.group;
-      this.ghost.traverse(o=>{if(o.isMesh){o.material=o.material.clone();o.material.transparent=true;o.material.opacity=.3;o.material.depthWrite=false;o.castShadow=false;o.receiveShadow=false;}});
+      const originalMaterials=resources([this.ghost]).materials,clones=new Map();
+      this.ghost.traverse(o=>{if(o.isMesh){if(!clones.has(o.material)){const material=o.material.clone();material.transparent=true;material.opacity=.3;material.depthWrite=false;clones.set(o.material,material);}o.material=clones.get(o.material);o.castShadow=false;o.receiveShadow=false;}});
+      for(const material of originalMaterials)if(!Object.values(this.materials).includes(material))material.dispose();
       this.scene.add(this.ghost);
     }
     const p=this.track.sample(pose.distance),offset=pose.offset??0;

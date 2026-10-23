@@ -8,6 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Race } from '../src/game/race.js';
 import { track, createTrack, TRACK_CATALOG, DEFAULT_TRACK_ID } from '../src/game/track.js';
 import { PROTOCOL_VERSION, MULTIPLAYER_MODES, NETWORK_CAPABILITIES, UPDATE_MESSAGE, isRaceMode } from '../src/game/protocol.js';
+import { configureRoom, voteForTrack, trackVoteSummary, returnRoomToLobby } from './party-room.js';
 
 const port = Number(process.env.PORT || 3001);
 const setting=(name,fallback,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(process.env[name]))?Number(process.env[name]):fallback));
@@ -31,11 +32,13 @@ const send = (client, message) => {
 };
 const broadcast = (room, message) => { for (const client of room.members.values()) send(client, message); };
 const protocolInfo={protocolVersion:PROTOCOL_VERSION,modes:MULTIPLAYER_MODES,capabilities:NETWORK_CAPABILITIES};
-const snapshotMessage=(room,state=room.race.snapshot())=>({type:'snapshot',...protocolInfo,mode:room.mode,tick:room.tick,serverTime:performance.now(),inputAcks:Object.fromEntries([...room.members.values()].map(c=>[c.id,c.seq])),state:{...state,mode:room.mode}});
+const withEventIds = (room, state) => ({ ...state, mode: room.mode, events: (state.events || []).map(event => ({ ...event, eventId: `${room.code}:${room.roundId}:${++room.eventSeq}` })) });
+const snapshotMessage=(room,state=room.race.snapshot())=>({type:'snapshot',...protocolInfo,mode:room.mode,roomCode:room.code,roundId:room.roundId,tick:room.tick,serverTime:performance.now(),inputAcks:Object.fromEntries([...room.members.values()].map(c=>[c.id,c.seq])),state:withEventIds(room,state)});
 const roomState = room => ({
   type: 'room', code: room.code, hostId: room.hostId, status: room.status,
   players: [...room.members.values()].map(c => ({ id: c.id, name: c.name, character: c.character, connected: c.ws.readyState === WebSocket.OPEN })),
-  difficulty: room.difficulty, trackId: room.trackId, mode:room.mode, ...protocolInfo, laps: 3, maxPlayers: 8,
+  difficulty: room.difficulty, trackId: room.trackId, mode:room.mode, ...protocolInfo, laps: room.laps, maxPlayers: 8,
+  roundId: room.roundId, trackVotes: Object.fromEntries(room.trackVotes), ...trackVoteSummary(room, [...trackIds]),
 });
 
 function leaveRoom(client) {
@@ -46,6 +49,7 @@ function leaveRoom(client) {
   room?.race?.disconnectedIds?.delete(client.id);
   if (!room) return;
   room.members.delete(client.id);
+  room.trackVotes.delete(client.id);
   if (!room.members.size) { rooms.delete(room.code); return; }
   if (room.hostId === client.id) room.hostId = [...room.members.values()].find(member=>member.ws.readyState===WebSocket.OPEN)?.id ?? room.members.keys().next().value;
   if (room.race) {
@@ -68,7 +72,7 @@ function receive(client, message) {
   if (!data || typeof data !== 'object') return;
   if (data.type === 'ping') { send(client, { type: 'pong', time: data.time, serverTime: Date.now() }); return; }
   if (data.type === 'leave') { leaveRoom(client); send(client, { type: 'left' }); return; }
-  if (['create','join','start','input'].includes(data.type) && (data.protocolVersion!==PROTOCOL_VERSION||client.protocolVersion!==PROTOCOL_VERSION))throw new Error(UPDATE_MESSAGE);
+  if (['create','join','start','input','configure','voteTrack','returnToLobby'].includes(data.type) && (data.protocolVersion!==PROTOCOL_VERSION||client.protocolVersion!==PROTOCOL_VERSION))throw new Error(UPDATE_MESSAGE);
   if (data.type === 'create') {
     const trackId = data.trackId ?? DEFAULT_TRACK_ID;
     if (!trackIds.has(trackId)) throw new Error('没有找到这条赛道，请重新选择');
@@ -81,7 +85,7 @@ function receive(client, message) {
     client.lastCreateAt=now;
     if (client.room) leaveRoom(client);
     client.name = cleanName(data.name); client.character = allowedCharacters.has(data.character) ? data.character : 'fox';
-    const room = { code: newCode(), hostId: client.id, members: new Map([[client.id, client]]), status: 'lobby', difficulty: allowedDifficulty.has(data.difficulty) ? data.difficulty : 'normal', trackId, mode, race: null, tick: 0, lastActiveAt:now };
+    const room = { code: newCode(), hostId: client.id, members: new Map([[client.id, client]]), status: 'lobby', difficulty: allowedDifficulty.has(data.difficulty) ? data.difficulty : 'normal', trackId, mode, laps: 3, race: null, tick: 0, roundId: 0, eventSeq: 0, trackVotes: new Map(), lastActiveAt:now };
     rooms.set(room.code, room); client.room = room.code;
     send(client, roomState(room)); return;
   }
@@ -100,24 +104,37 @@ function receive(client, message) {
   }
   const room = rooms.get(client.room);
   if (!room) throw new Error('请先创建或加入房间');
+  if (data.type === 'configure' || data.type === 'returnToLobby') {
+    if (client.id !== room.hostId) throw new Error('只有房主可以调整房间');
+    if (data.type === 'configure') configureRoom(room, data, { trackIds: [...trackIds], modes: MULTIPLAYER_MODES, difficulties: [...allowedDifficulty] });
+    else returnRoomToLobby(room);
+    room.lastActiveAt = performance.now(); broadcast(room, roomState(room)); return;
+  }
+  if (data.type === 'voteTrack') {
+    voteForTrack(room, client.id, data.trackId, [...trackIds]);
+    room.lastActiveAt = performance.now(); broadcast(room, roomState(room)); return;
+  }
   if (data.type === 'start') {
     if (client.id !== room.hostId) throw new Error('只有房主可以开始比赛');
-    if (room.status === 'racing') throw new Error('比赛已经开始');
+    // A double click or a delayed request never resets an active/newer round.
+    if (room.status === 'racing' || (data.roundId !== undefined && data.roundId !== room.roundId)) { send(client, roomState(room)); return; }
     if([...room.members.values()].some(member=>member.protocolVersion!==PROTOCOL_VERSION))throw new Error(UPDATE_MESSAGE);
     if ([...room.members.values()].filter(c=>c.ws.readyState===WebSocket.OPEN).length < 2) throw new Error('邀请一位朋友加入后即可开始比赛');
+    room.trackId = trackVoteSummary(room, [...trackIds]).nextTrackId;
     room.race = new Race(roomTrack(room.trackId), {
       humanPlayers: [...room.members.values()].map(c => ({ id: c.id, name: c.name, character: c.character })),
-      multiplayer: true, difficulty: room.difficulty, laps: 3, mode:room.mode,
+      multiplayer: true, difficulty: room.difficulty, laps: room.laps, mode:room.mode,
     });
     room.race.disconnectedIds=new Set([...room.members.values()].filter(c=>c.ws.readyState!==WebSocket.OPEN).map(c=>c.id));
-    room.tick = 0; room.status = 'racing'; room.race.start();
+    room.tick = 0; room.roundId++; room.eventSeq = 0; room.trackVotes.clear(); room.status = 'racing'; room.lastActiveAt = performance.now(); room.race.start();
     for (const member of room.members.values()) { member.input = {}; member.inputAt = 0; member.seq = -1;member.itemUseSeq=0; }
-    const state = room.race.snapshot();
-    for (const member of room.members.values()) send(member, { type: 'started', ...protocolInfo,mode:room.mode,playerId: member.id,lastItemUseSeq:0,state:{...state,mode:room.mode} });
+    const state = withEventIds(room, room.race.snapshot());
+    for (const member of room.members.values()) send(member, { type: 'started', ...protocolInfo,mode:room.mode,roomCode:room.code,roundId:room.roundId,playerId: member.id,lastItemUseSeq:0,state });
     broadcast(room, roomState(room)); return;
   }
   if (data.type === 'input') {
     if (!room.race || room.status !== 'racing') return;
+    if (data.roundId !== undefined && data.roundId !== room.roundId) return;
     const seq = Number(data.seq);
     if (!Number.isSafeInteger(seq)||seq<0||seq<=client.seq) return;
     client.seq = seq;
@@ -192,7 +209,7 @@ wss.on('connection', (ws,request) => {
     const room=rooms.get(client.room);room.race?.disconnectedIds?.delete(client.id);
     if(room.members.get(room.hostId)?.ws.readyState!==WebSocket.OPEN)room.hostId=client.id;
     broadcast(room,roomState(room));
-    if(room.race){const message=snapshotMessage(room);broadcast(room,message);send(client,{type:'started',...protocolInfo,mode:room.mode,playerId:client.id,lastItemUseSeq:client.itemUseSeq,state:{...message.state,events:[]},resumed:true});}
+    if(room.race){const message=snapshotMessage(room);broadcast(room,message);send(client,{type:'started',...protocolInfo,mode:room.mode,roomCode:room.code,roundId:room.roundId,playerId:client.id,lastItemUseSeq:client.itemUseSeq,state:{...message.state,events:[]},resumed:true});}
   }
   ws.on('message', bytes => {
     const now=performance.now();if(now-client.rateAt>1000){client.messages=0;client.rateAt=now;}
