@@ -151,7 +151,7 @@ export class UI {
     this.mobile?.sync();
   }
 
-  hideOverlays() { this.all('.overlay:not(.settings-overlay)').forEach(el => { el.hidden = true; }); }
+  hideOverlays() { this.all('.overlay:not(.settings-overlay):not(.new-player-guide)').forEach(el => { el.hidden = true; }); }
   clearTouch() { this.touchControls?.clear(); }
 
   update(state = {}) {

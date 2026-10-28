@@ -8,6 +8,7 @@ import './pickups.css';
 import './time-trial.css';
 import './items.css';
 import './play-hub.css';
+import './new-player-guide.css';
 import { track as defaultTrack, createTrack, TRACK_CATALOG, DEFAULT_TRACK_ID } from './game/track.js';
 import { Race } from './game/race.js';
 import { UI } from './ui.js';
@@ -29,6 +30,7 @@ import { Career, Cup, DrivingLesson } from './career.js';
 import { PlayHub } from './play-hub.js';
 import { PartyUI } from './party-ui.js';
 import { itemThreatFor } from './game/items.js';
+import { NewPlayerGuide } from './new-player-guide.js';
 
 const trackCache=new Map([[DEFAULT_TRACK_ID,defaultTrack]]);
 function getTrack(id){if(!trackCache.has(id))trackCache.set(id,createTrack(id));return trackCache.get(id);}
@@ -38,7 +40,7 @@ let track=getTrack(initialTrackId);
 let race=new Race(track),world,settings,coursePicker,worldGeneration=0,worldLoading=false,worldReady=Promise.resolve(),settingsResume=false,online=false,showedResults=false,rotationPaused=false,selection={character:'fox',difficulty:'normal',trackId:track.id,mode:'race'};
 const keys=new Set(),audio=new AudioEngine();
 let pendingItemPress=false;
-let cup=null,lesson=null,startingAdventure=false;
+let cup=null,lesson=null,startingAdventure=false,guide;
 const career=new Career();
 let recorder=null,ghostRecording=null,trialMeta=null,trialUI,pickupFeedback,minimapView;
 const ghostStore=new GhostStore({onError:message=>ui.showToast(message)}),sessionGhosts=new Map();
@@ -92,7 +94,7 @@ settings=new GameSettings(document.querySelector('#app'),{
   defaults:{autoThrottle:ui.mobile.inputMode==='touch'},onChange:applySettings,
   onOpen:()=>{ui.settingsOpen=true;clearKeys();settingsResume=!online&&['racing','countdown'].includes(race.phase);if(settingsResume){race.pause();ui.setPaused(true);}},
   onClose:()=>{ui.settingsOpen=false;clearKeys();if(settingsResume&&race.phase==='paused'){if(ui.mobile.blocked)rotationPaused=true;else resume();}settingsResume=false;},
-  onBindingsChange:bindings=>{clearKeys();ui.setKeyBindings(bindings);itemHUD.setBindings(bindings);},
+  onBindingsChange:bindings=>{clearKeys();ui.setKeyBindings(bindings);itemHUD.setBindings(bindings);guide?.refresh();},
 });
 ui.setKeyBindings(settings.bindings);
 itemHUD.setBindings(settings.bindings);
@@ -109,6 +111,13 @@ const network=new Network({
   },
   error:message=>ui.showToast(message),
   disconnected:()=>{mainMenu();ui.showToast('联机连接已断开，请重新创建或加入房间');},
+});
+
+guide=new NewPlayerGuide(ui.root,{
+  getBindings:()=>settings.bindings,
+  canOpen:()=>race.phase==='menu'&&!online&&!network.room&&!worldLoading&&!ui.overview,
+  onOpen:()=>{ui.hideHelp();clearKeys();},onClose:clearKeys,
+  onPractice:()=>hub.callbacks.onLesson?.(),onSaveError:message=>ui.showToast(message),
 });
 
 function selectCourse(id,persist=false){
@@ -153,9 +162,9 @@ function predictPlayer(duration,input){
   race.events.length=eventCount;
 }
 
-function readInput(){const blocked=ui.mobile.blocked||settings.isOpen||!hub.overlay.hidden||race.player.finished;const input=drivingInput(keys,ui.touchState,ui.autoThrottle,{bindings:settings.bindings,sensitivity:settings.values.steeringSensitivity,blocked});if(!blocked&&pendingItemPress)input.useItem=true;return input;}
+function readInput(){const blocked=ui.mobile.blocked||settings.isOpen||guide.isOpen||!hub.overlay.hidden||race.player.finished;const input=drivingInput(keys,ui.touchState,ui.autoThrottle,{bindings:settings.bindings,sensitivity:settings.values.steeringSensitivity,blocked});if(!blocked&&pendingItemPress)input.useItem=true;return input;}
 window.addEventListener('keydown',event=>{
-  if(settings.isOpen||ui.mobile.blocked)return;
+  if(settings.isOpen||guide.isOpen||ui.mobile.blocked)return;
   if(event.isComposing||event.key==='Process'||event.keyCode===229||event.ctrlKey||event.metaKey||event.altKey){keys.clear();pendingItemPress=false;return;}
   if(event.target?.closest?.('input,textarea,select,[contenteditable="true"],.courses-overlay,.help-overlay,.lobby-overlay,.play-hub-overlay'))return;
   const action=actionForKey(settings.bindings,event.code);if(!action)return;
@@ -179,6 +188,7 @@ function finish(){if(showedResults)return;showedResults=true;if(lesson){mainMenu
 }
 async function boot(){try{
   worldReady=loadWorld();await worldReady;
+  guide.offer();
   let last=performance.now(),accumulator=0;
   function frame(now){const rawFrameMs=now-last,dt=Math.min(rawFrameMs/1000,.05);last=now;
     if(!online&&ui.mobile.blocked&&!settings.isOpen&&['countdown','racing'].includes(race.phase)){rotationPaused=true;race.pause();ui.setPaused(true);clearKeys();}
@@ -189,7 +199,7 @@ async function boot(){try{
     }
     else{accumulator+=dt;while(accumulator>=1/60){race.update(1/60,input);pendingItemPress=false;accumulator-=1/60;}}
     for(const e of race.consumeEvents()){if(e.racerId&&e.racerId!==race.player.id)continue;audio.event(e);pickupFeedback.event(e);if(e.type==='finish'&&online&&e.racerId===race.player.id)ui.showToast('你已冲线！可以观战仍在比赛的朋友');else if(e.text&&!['countdown','go','drift','driftStage','finish','results'].includes(e.type))ui.showToast(e.text);}
-    ui.update(race);itemHUD.update(race);ui.updateCourse(race.player.distance);if(race.phase==='countdown')ui.showCountdown(String(Math.ceil(race.countdown)));else ui.showCountdown('');
+    ui.update(race);itemHUD.update(race);guide.update();ui.updateCourse(race.player.distance);if(race.phase==='countdown')ui.showCountdown(String(Math.ceil(race.countdown)));else ui.showCountdown('');
     if(recorder&&['racing','finished'].includes(race.phase))recorder.record(race.elapsed,race.player);
     if(race.mode==='time-trial'){trialUI.update(race,ghostRecording);const pose=ghostRecording&&['countdown','racing','paused'].includes(race.phase)?ghostPoseAt(ghostRecording,race.elapsed):null;world?.updateGhost(pose?{...pose,character:selection.character}:null);}
     if(lesson){lesson.update(race,input);if(lesson.done&&!career.tutorialDone){career.tutorialDone=true;career.save();}}

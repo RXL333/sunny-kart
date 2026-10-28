@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ context }) => {
-  await context.addInitScript(() => localStorage.setItem('sunny-settings-v1', JSON.stringify({ graphics: 'smooth' })));
+  await context.addInitScript(() => {
+    localStorage.setItem('sunny-onboarding-v1', 'done');
+    localStorage.setItem('sunny-settings-v1', JSON.stringify({ graphics: 'smooth' }));
+  });
 });
 
 async function developmentGame(page) {

@@ -4,6 +4,7 @@ import { test, expect } from '@playwright/test';
 // so test deadlines do not depend on a cloud machine having a physical GPU.
 async function smoothRendering(context) {
   await context.addInitScript(() => {
+    localStorage.setItem('sunny-onboarding-v1', 'done');
     if (!localStorage.getItem('sunny-settings-v1')) localStorage.setItem('sunny-settings-v1', JSON.stringify({ graphics: 'smooth' }));
   });
 }

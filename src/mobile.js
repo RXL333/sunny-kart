@@ -11,7 +11,7 @@ export function mobileLayout({width,height,coarse=false,fine=false,touchPoints=0
 
 function keyboardDrivingEvent(event) {
   if(event.repeat||event.isComposing||event.key==='Process'||event.keyCode===229||event.ctrlKey||event.altKey||event.metaKey)return false;
-  if(event.target?.closest?.('.settings-overlay,.control-layout-editor,.courses-overlay,input,textarea,select,[contenteditable]'))return false;
+  if(event.target?.closest?.('.settings-overlay,.control-layout-editor,.courses-overlay,.new-player-guide,input,textarea,select,[contenteditable]'))return false;
   return /^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right)|Shift(Left|Right)|Space|Enter|Escape|Numpad([0-9]|Add|Subtract|Multiply|Divide|Decimal|Enter)|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash)$/.test(event.code);
 }
 

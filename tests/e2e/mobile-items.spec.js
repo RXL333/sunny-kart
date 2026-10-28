@@ -43,6 +43,7 @@ test('touch phones keep seven landscape controls clear of HUD, use items, and pr
   const context=await browser.newContext({viewport:{width:667,height:375},deviceScaleFactor:1,isMobile:true,hasTouch:true});
   try {
     await context.addInitScript(() => {
+      localStorage.setItem('sunny-onboarding-v1', 'done');
       if(!localStorage.getItem('sunny-settings-v1'))localStorage.setItem('sunny-settings-v1',JSON.stringify({graphics:'smooth',autoThrottle:false}));
     });
     const page=await context.newPage(),errors=[];
